@@ -61,6 +61,33 @@ class ExtractionError(RuntimeError):
     """Raised when the local model cannot be reached or fails outright."""
 
 
+# Whether a given model accepts the `think` parameter. Ollama rejects it for
+# models with no reasoning mode, so the answer is learned from the first
+# attempt and remembered rather than guessed from the model's name.
+_THINK_SUPPORT: dict[str, bool] = {}
+
+
+def _strip_reasoning(content: str) -> str:
+    """Remove any reasoning the model emitted before its answer.
+
+    Structured output should prevent this, and `think: false` should prevent it
+    again, but a reasoning model that ignores both would otherwise fail at
+    json.loads with a wall of prose. Falling back to the outermost braces
+    handles whatever tag convention a future model invents.
+    """
+    text = content.strip()
+    for opener, closer in (("<think>", "</think>"), ("<|think|>", "<|/think|>")):
+        while opener in text and closer in text:
+            start = text.index(opener)
+            end = text.index(closer, start) + len(closer)
+            text = (text[:start] + text[end:]).strip()
+
+    if text.startswith("{"):
+        return text
+    first, last = text.find("{"), text.rfind("}")
+    return text[first : last + 1] if 0 <= first < last else text
+
+
 def empty_result() -> dict:
     """A blank result, so a failed extraction still produces a usable file."""
     return fields.empty()
@@ -205,8 +232,18 @@ def _extract_one(text: str, cfg, business, part: tuple[int, int] | None) -> dict
             "num_ctx": cfg.num_ctx,
         },
     }
+    if _THINK_SUPPORT.get(cfg.model, True):
+        payload["think"] = bool(getattr(cfg, "think", False))
 
-    resp = _post(f"{cfg.base_url}/api/chat", payload, cfg)
+    url = f"{cfg.base_url}/api/chat"
+    resp = _post(url, payload, cfg)
+
+    # Older models have no reasoning mode and reject the parameter outright.
+    if not resp.ok and "think" in resp.text.lower() and "think" in payload:
+        log.debug("%s does not accept the think parameter; retrying without it", cfg.model)
+        _THINK_SUPPORT[cfg.model] = False
+        payload.pop("think")
+        resp = _post(url, payload, cfg)
 
     if resp.status_code == 404:
         raise ExtractionError(
@@ -221,7 +258,7 @@ def _extract_one(text: str, cfg, business, part: tuple[int, int] | None) -> dict
         raise ExtractionError(f"unexpected reply from Ollama: {resp.text[:400]}") from exc
 
     try:
-        raw = json.loads(content)
+        raw = json.loads(_strip_reasoning(content))
     except ValueError as exc:
         # Structured output should make this impossible, but an older Ollama
         # that ignores `format` would land here.

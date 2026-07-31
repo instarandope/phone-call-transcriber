@@ -132,11 +132,25 @@ language = "en"
 # Local LLM that turns the raw transcript into work-order fields.
 base_url = "http://127.0.0.1:11434"
 
-# Any Ollama model. gemma3:4b is a good balance on a normal work PC.
-#   gemma3:1b  -- fastest, weakest at addresses
-#   gemma3:4b  -- recommended
-#   gemma3:12b -- best, needs ~10 GB RAM
+# Any model from https://ollama.com/library . Worth comparing on your own
+# hardware rather than taking anyone's word:
+#     run.bat compare somecall.wav --models gemma3:4b,gemma4:e4b
+#
+#   gemma4:e4b  -- built for edge hardware, and the first Gemma with native
+#                  system-role support, which is what carries the "never invent
+#                  a value" rules. Try this one first.
+#   gemma4:e2b  -- smaller sibling, if e4b is too slow
+#   gemma3:4b   -- the previous default; dependable
+#   gemma3:1b   -- fastest, weakest at addresses
+#   gemma4:12b  -- more accurate, wants ~10 GB RAM and real patience on an
+#                  older CPU
 model = "gemma3:4b"
+
+# Reasoning models think before answering. Filling in a fixed schema from a
+# transcript needs no reasoning, and on a slow CPU it is minutes of pure cost.
+# Leave this off unless you are testing whether it helps. Models with no
+# reasoning mode ignore it.
+think = false
 
 temperature = 0.0
 num_ctx = 8192

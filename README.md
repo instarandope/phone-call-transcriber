@@ -280,7 +280,7 @@ Command Prompt opens already pointed at the folder. Then:
 
 ```
 run.bat test somecall.wav    process an existing recording
-run.bat compare somecall.wav --models gemma3:4b,gemma3n:e4b
+run.bat compare somecall.wav --models gemma3:4b,gemma4:e4b
 run.bat purge                shred any kept audio
 run.bat purge --all          shred transcripts and work orders too
 ```
@@ -462,15 +462,20 @@ more effective than moving up a model size.
 call with `keep_audio = true` and run it through several:
 
 ```
-ollama pull gemma3n:e4b
+ollama pull gemma4:e4b
 run.bat compare output\2026-07-31\160012-roomie\call.wav --models gemma3:4b,gemma3n:e4b,gemma3:12b
 ```
 
 It transcribes once, then extracts with each model in turn, printing every work
 order plus a table of how long each took. Any model in the [Ollama
-library](https://ollama.com/library) works. `gemma3n` is Google's on-device
-line — `e4b` benchmarks above `gemma3:4b` and is built for hardware like this,
-so it is the first one worth trying.
+library](https://ollama.com/library) works. **`gemma4:e4b`** is the one to try
+first: the "E" is for effective parameters, it targets edge hardware, and
+Gemma 4 is the first of the line with native system-role support — which is
+what carries the "never invent a value" rules this depends on.
+
+If you use a reasoning model, leave `think = false` under `[extract]`. There is
+nothing to reason about in copying stated facts into a fixed schema, and on an
+older CPU the reasoning tokens cost minutes per call.
 
 Judge by reading the work orders against the transcript, not by the field
 count. A model that invents a plausible address fills more fields and sends a

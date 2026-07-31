@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from call_transcriber import extract, fields
@@ -291,3 +293,35 @@ def test_staff_names_are_given_to_the_model():
     prompt = extract._user_prompt("hello", Business(), None)
     assert "NEVER the customer" in prompt
     assert "Johan, Jeremy" in prompt
+
+
+# -- reasoning models ------------------------------------------------------
+
+
+def test_plain_json_is_untouched():
+    assert extract._strip_reasoning('{"caller_name": "Roomie"}') == '{"caller_name": "Roomie"}'
+
+
+def test_a_reasoning_block_is_removed():
+    reply = '<think>The caller says their name early on.</think>\n{"caller_name": "Roomie"}'
+    assert json.loads(extract._strip_reasoning(reply))["caller_name"] == "Roomie"
+
+
+def test_the_pipe_tag_convention_is_handled_too():
+    reply = '<|think|>Working through it.<|/think|> {"caller_name": "Roomie"}'
+    assert json.loads(extract._strip_reasoning(reply))["caller_name"] == "Roomie"
+
+
+def test_several_reasoning_blocks_are_all_removed():
+    reply = '<think>one</think>\n<think>two</think>\n{"caller_name": "Roomie"}'
+    assert json.loads(extract._strip_reasoning(reply))["caller_name"] == "Roomie"
+
+
+def test_untagged_prose_before_the_json_still_parses():
+    """Whatever tag convention a future model invents, braces still bound it."""
+    reply = 'Let me work through this carefully.\n{"caller_name": "Roomie"}\nDone.'
+    assert json.loads(extract._strip_reasoning(reply))["caller_name"] == "Roomie"
+
+
+def test_something_with_no_json_at_all_is_left_alone_to_fail_loudly():
+    assert extract._strip_reasoning("I cannot answer that") == "I cannot answer that"

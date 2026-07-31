@@ -56,6 +56,10 @@ class TranscribeConfig:
 class ExtractConfig:
     base_url: str = "http://127.0.0.1:11434"
     model: str = "gemma3:4b"
+    # Reasoning models spend tokens thinking before answering. For filling in a
+    # fixed schema from a transcript there is nothing to reason about, and on a
+    # slow CPU it is minutes of pure cost.
+    think: bool = False
     temperature: float = 0.0
     num_ctx: int = 8192
     chunk_chars: int = 12000
