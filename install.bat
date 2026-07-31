@@ -9,30 +9,53 @@ echo  ============================================================
 echo.
 
 REM ---------------------------------------------------------------- Python --
+REM Two different failures used to produce the same message here: "no Python
+REM at all" and "Python, but too old". They need different fixes, so they are
+REM detected and reported separately.
+REM
+REM `where python` is not a usable test. Windows ships a stub python.exe that
+REM only opens the Microsoft Store -- it answers `where` and then fails when
+REM run. So each candidate is tested by actually executing it.
 set PY=
-where py >nul 2>&1 && set PY=py -3
+set PYVER=
+
+py -3 -c "import sys" >nul 2>&1 && set PY=py -3
 if not defined PY (
-    where python >nul 2>&1 && set PY=python
+    python -c "import sys" >nul 2>&1 && set PY=python
 )
+
 if not defined PY (
-    echo  [XX] Python was not found.
+    echo  [XX] Python is not installed on this PC.
     echo.
-    echo       Install Python 3.11 or newer from https://www.python.org/downloads/
-    echo       On the first screen of the installer, tick "Add python.exe to PATH".
+    echo       1. Go to https://www.python.org/downloads/
+    echo       2. Download the latest Windows installer
+    echo       3. On the FIRST screen, tick "Add python.exe to PATH" ^(easy to miss^)
+    echo       4. Install, then run install.bat again
+    echo.
+    echo       If you think it IS installed: close this window and open a new
+    echo       one first. A window opened before the install still has the old
+    echo       PATH and cannot see it.
     echo.
     pause
     exit /b 1
 )
 
-%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+for /f "delims=" %%v in ('%PY% --version 2^>^&1') do set PYVER=%%v
+
+REM Written with max() rather than a comparison so no angle bracket ever
+REM reaches cmd, which would treat it as a redirect.
+%PY% -c "import sys; sys.exit(0 if max((3,11), sys.version_info[:2]) == sys.version_info[:2] else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo  [XX] Python 3.11 or newer is required.
-    %PY% --version
+    echo  [XX] Found %PYVER%, but 3.11 or newer is needed.
+    echo.
+    echo       Install a current version from https://www.python.org/downloads/
+    echo       and tick "Add python.exe to PATH" on the first screen. The new
+    echo       version installs alongside the old one; nothing is removed.
     echo.
     pause
     exit /b 1
 )
-for /f "delims=" %%v in ('%PY% --version 2^>^&1') do echo  [ok] %%v
+echo  [ok] %PYVER%
 
 REM ------------------------------------------------------------ virtualenv --
 if not exist ".venv\Scripts\python.exe" (
