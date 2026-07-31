@@ -76,10 +76,36 @@ echo  [..] Installing packages ^(a few minutes the first time^)
 "%VENV_PY%" -m pip install -r requirements.txt --quiet
 if errorlevel 1 (
     echo  [XX] Package installation failed. Scroll up for the reason.
+    echo.
+    echo       If you see any of these:
+    echo         - "Microsoft Visual C++ 14.0 or greater is required"
+    echo         - "Building wheel for ... error"
+    echo         - "no matching distribution found"
+    echo.
+    echo       ...then your Python is newer than some of these packages support
+    echo       yet, and pip is trying to compile them from scratch. Several of
+    echo       them contain C++ code and only ship ready-built for versions
+    echo       they have caught up with.
+    echo.
+    echo       Fix: install Python 3.12 from https://www.python.org/downloads/
+    echo       - scroll past the yellow button to the version list. Then delete
+    echo       the .venv folder next to this script and run install.bat again.
+    echo       If you have a newer Python installed too, uninstall it first so
+    echo       the launcher picks 3.12.
+    echo.
     pause
     exit /b 1
 )
 echo  [ok] Packages installed
+
+REM Everything installed, so the wheels exist -- but say so if this is a
+REM Python newer than the project has actually been exercised on.
+"%VENV_PY%" -c "import sys; sys.exit(0 if max(sys.version_info[:2], (3,13)) == (3,13) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo  [!!] %PYVER% is newer than this project has been tried against.
+    echo       It installed cleanly, so it should be fine - but if anything
+    echo       behaves oddly later, Python 3.12 is the version to fall back to.
+)
 
 REM --------------------------------------------------------------- config ---
 if not exist "config.toml" (

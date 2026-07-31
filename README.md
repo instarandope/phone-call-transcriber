@@ -74,7 +74,7 @@ another one is not missed — see [Back-to-back calls](#back-to-back-calls).
 |---|---|
 | **Adapter** | VEC LRX-40USB, plugged into a USB port, with the handset cord running through it. Corded phones only — it cannot tap a cordless handset. |
 | **Windows** | 10 or 11. |
-| **Python** | 3.11 or newer, from [python.org](https://www.python.org/downloads/). Tick **Add python.exe to PATH** on the first installer screen. |
+| **Python** | **3.12** is the one to install, from [python.org](https://www.python.org/downloads/) — scroll past the yellow button to the version list. 3.11 and 3.13 work too. Tick **Add python.exe to PATH** on the first installer screen. Not from the Microsoft Store. |
 | **Ollama** | From [ollama.com/download](https://ollama.com/download). This runs the local model that reads the transcript. |
 | **Disk** | About 5 GB for the two models. |
 | **RAM** | 8 GB works. 16 GB is comfortable. |
@@ -277,6 +277,13 @@ the Start menu; it lives in the system tray.
 
 **Transcription is very slow** — a call should process in well under its own
 length. If not, drop `transcribe.model` to `base.en`.
+
+**`install.bat` fails with compiler errors** — "Microsoft Visual C++ 14.0 or
+greater is required", "Building wheel for … error", or "no matching
+distribution found". Your Python is newer than some dependencies have shipped
+ready-built wheels for, so pip is trying to compile C++ from source. Install
+Python 3.12, delete the `.venv` folder, and run `install.bat` again. Newest is
+not best here — pick the version the ecosystem has caught up with.
 
 ## How it works
 
