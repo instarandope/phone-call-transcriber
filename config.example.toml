@@ -75,8 +75,10 @@ noise_floor_dbfs = -48.0
 # handset knocked off the cradle, a wrong number).
 min_call_s = 10.0
 
-# Hard stop, so a handset left off-hook can't record forever.
-max_call_s = 3600.0
+# Hard stop, so a recording left running can't go on forever. In manual mode
+# this is the backstop for a hotkey that never got pressed a second time.
+# Set it above your longest realistic call and no higher.
+max_call_s = 1800.0
 
 
 [control]

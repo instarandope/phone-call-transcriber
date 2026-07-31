@@ -33,7 +33,9 @@ class DetectConfig:
     # here splits calls in half whenever someone goes quiet for a moment.
     hangup_silence_s: float = 45.0
     min_call_s: float = 10.0
-    max_call_s: float = 3600.0
+    # Real calls top out around 25 minutes here, so 30 leaves headroom while
+    # still catching a hotkey that never got pressed a second time.
+    max_call_s: float = 1800.0
     noise_floor_dbfs: float = -48.0
     # The line going properly silent means the handset is back on the cradle.
     line_dead_dbfs: float = -59.0
