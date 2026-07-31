@@ -114,7 +114,7 @@ The adapter has two controls, and both matter:
 The multi-colour LED is not documented beyond being a "mode indicator", so
 judge by the level meter rather than by the light.
 
-**Verify with `run.bat levels`.** With the handset on the cradle the meter
+**Verify with `levels.bat`.** With the handset on the cradle the meter
 should stay flat, even when you talk in the room. Lift the handset and it
 should jump on dial tone. Try both switch positions and keep the one that
 behaves that way. If neither does, the adapter is on the wrong jack.
@@ -142,11 +142,7 @@ everything, downloads both models, and offers to start the app automatically
 with Windows. It finishes by checking the whole setup and telling you about
 anything that is wrong.
 
-Then find your adapter:
-
-```
-run.bat devices
-```
+Then find your adapter by double-clicking **`devices.bat`**.
 
 You will see something like `[2] Microphone (USB Audio Device) (1ch @ 44100 Hz)`.
 Open `config.toml`, and set `device_match` to a distinctive piece of that name:
@@ -156,27 +152,42 @@ Open `config.toml`, and set `device_match` to a distinctive piece of that name:
 device_match = "USB Audio"
 ```
 
-Check everything is ready:
+Check everything is ready by double-clicking **`doctor.bat`**.
 
-```
-run.bat doctor
-```
-
-Then calibrate the call detection against your actual phone line — this takes
-45 seconds and is worth doing properly:
-
-```
-run.bat levels
-```
+Then calibrate the call detection against your actual phone line by
+double-clicking **`levels.bat`**. This takes 45 seconds and is worth doing
+properly.
 
 It shows a live level meter and asks you to leave the handset on the cradle,
 then lift it and stay quiet, then talk. From those three it prints the two
 threshold values to paste into `config.toml`. The defaults are reasonable
 guesses; these are measurements.
 
-Once every `doctor` line reads `[ok]`, you are done. If you let the installer
+Once every `doctor.bat` line reads `[ok]`, you are done. If you let the installer
 add it to startup, it is already running invisibly in the background —
 otherwise double-click **`run.bat`**.
+
+## The double-clickable scripts
+
+Everything can be run by double-clicking, so you never need a terminal:
+
+| File | What it does |
+|---|---|
+| **`install.bat`** | One-time setup. Safe to re-run; it skips whatever is already done. |
+| **`run.bat`** | Start listening for calls. |
+| **`devices.bat`** | List audio inputs, to find the adapter's name for `config.toml`. |
+| **`doctor.bat`** | Check everything: packages, adapter, models, output folder. |
+| **`levels.bat`** | Meter the phone line and print the threshold values to use. |
+
+The less common ones need a terminal, because they take an argument. Open the
+folder in File Explorer, click the address bar, type `cmd` and press Enter — a
+Command Prompt opens already pointed at the folder. Then:
+
+```
+run.bat test somecall.wav    process an existing recording
+run.bat purge                shred any kept audio
+run.bat purge --all          shred transcripts and work orders too
+```
 
 ## Trying it without waiting for a real call
 
@@ -295,11 +306,11 @@ change:
 
 ## When something is wrong
 
-Start with `run.bat doctor`. It checks each piece and says what to do about
+Start with `doctor.bat`. It checks each piece and says what to do about
 anything broken. Beyond that:
 
 **No device matching 'LRX'** — the adapter reports itself under a generic name
-on many machines. Run `run.bat devices` and copy part of whatever you actually
+on many machines. Double-click `devices.bat` and copy part of whatever you actually
 see into `device_match`.
 
 **Nothing happens during calls** — check that the handset cord runs *through*
@@ -308,10 +319,10 @@ System → Sound → Input, pick the adapter, and watch the level bar while you
 talk. If the bar does not move, it is a wiring problem, not a software one.
 
 **Recordings start when nobody is calling** — line noise is crossing the
-threshold. Run `run.bat levels`, or just raise `noise_floor_dbfs` to `-40`.
+threshold. Run `levels.bat`, or just raise `noise_floor_dbfs` to `-40`.
 
 **Calls get cut in half** — the line is dropping below `line_dead_dbfs` during
-pauses, so a hesitation reads as a hangup. Run `run.bat levels` while
+pauses, so a hesitation reads as a hangup. Run `levels.bat` while
 deliberately staying quiet on an open line; if that quiet sits near the dead
 threshold, lower `line_dead_dbfs` by 5–10, or raise `line_dead_s` to `5.0`.
 Each half of a split call is saved separately, so check the folder either side
@@ -320,7 +331,7 @@ first half.
 
 **Calls take ages to end after you hang up** — the dead-line test is not
 firing, so it is falling through to the 45-second backstop. Your line stays
-noisy on hook: run `run.bat levels`, note the on-cradle level, and set
+noisy on hook: run `levels.bat`, note the on-cradle level, and set
 `line_dead_dbfs` a few dB above it.
 
 **The transcript is good but the fields are empty** — that is the extraction

@@ -19,5 +19,6 @@ set PYTHONPATH=%~dp0src
 ".venv\Scripts\python.exe" -m call_transcriber %*
 
 REM Only hold the window open when something went wrong and there is an error
-REM to read; a clean Ctrl-C exit shouldn't need a keypress.
-if errorlevel 1 pause
+REM to read; a clean Ctrl-C exit shouldn't need a keypress. The helper scripts
+REM set CT_NO_PAUSE because they pause themselves afterwards.
+if errorlevel 1 if not defined CT_NO_PAUSE pause

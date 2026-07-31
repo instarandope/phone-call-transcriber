@@ -176,8 +176,10 @@ echo.
 "%VENV_PY%" -m call_transcriber doctor
 
 echo.
-echo   Next:
-echo     run.bat devices   - find your adapter's name for config.toml
-echo     run.bat           - start listening
+echo   Next - all of these are double-clickable, no typing needed:
+echo     devices.bat   - find your adapter's name for config.toml
+echo     doctor.bat    - check everything is ready
+echo     levels.bat    - meter your phone line, get the threshold values
+echo     run.bat       - start listening for calls
 echo.
 pause
