@@ -137,6 +137,14 @@ def process_file(path: Path, cfg, *, ui=None) -> Result:
 class Runner:
     """Owns the live capture loop."""
 
+    # A phone line is quiet almost all day. An input that reads as an active
+    # call nearly continuously is not a phone line -- it is a microphone
+    # hearing the room, which means the adapter is on the wrong jack or in the
+    # wrong mode. Worth saying out loud, because the symptom otherwise looks
+    # like "it started recording the moment I ran it" and reads as a bug.
+    HOT_INPUT_AFTER_FRAMES = 15_000  # five minutes of 20 ms frames
+    HOT_INPUT_RATIO = 0.9
+
     def __init__(self, cfg, ui=None):
         self.cfg = cfg
         self.ui = ui
@@ -144,6 +152,9 @@ class Runner:
         self.paused = threading.Event()
         self.state = State.IDLE
         self.calls_handled = 0
+        self._frames_seen = 0
+        self._frames_in_call = 0
+        self._warned_hot = False
         self._thread: threading.Thread | None = None
         self._pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="transcribe"
@@ -196,6 +207,7 @@ class Runner:
                     call = detector.push(frame)
                     if call is not None:
                         self._submit(call)
+                    self._note_frame(detector.state)
 
                 final = detector.flush()
                 if final is not None:
@@ -214,6 +226,33 @@ class Runner:
             self.stop_event.set()
             if self.ui is not None:
                 self.ui.shutdown()
+
+    def _note_frame(self, state: State) -> None:
+        """Watch for an input that is never idle, and say so once."""
+        self._frames_seen += 1
+        if state is State.IN_CALL:
+            self._frames_in_call += 1
+
+        if self._warned_hot or self._frames_seen < self.HOT_INPUT_AFTER_FRAMES:
+            return
+        ratio = self._frames_in_call / self._frames_seen
+        if ratio < self.HOT_INPUT_RATIO:
+            return
+
+        self._warned_hot = True
+        log.warning(
+            "This input has counted as an active call for %.0f%% of the last %d "
+            "minutes. A phone line is silent when nobody is on it, so the adapter "
+            "is almost certainly hearing the room rather than the handset.",
+            ratio * 100,
+            self.HOT_INPUT_AFTER_FRAMES // 3000,
+        )
+        log.warning(
+            "Stop with Ctrl-C and run `run.bat levels`. Put the handset down and "
+            "watch the meter: if it stays high, the problem is which jack the "
+            "adapter is plugged into or which position its switch is in -- not "
+            "anything in config.toml."
+        )
 
     def _submit(self, call: Call) -> None:
         self.calls_handled += 1

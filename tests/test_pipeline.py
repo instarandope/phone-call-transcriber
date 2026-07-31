@@ -205,3 +205,49 @@ def test_the_popup_does_not_claim_a_copy_that_did_not_happen(cfg, call, stub_mod
 
     pipeline.process_call(call, cfg, ui=Ui())
     assert posted[0].copied is False
+
+
+# -- an input that is never idle -------------------------------------------
+
+
+def _run_frames(runner, state, count):
+    for _ in range(count):
+        runner._note_frame(state)
+
+
+def test_a_constantly_hot_input_is_called_out(cfg, caplog):
+    """The 'it started recording the moment I ran it' symptom."""
+    runner = pipeline.Runner(cfg)
+    with caplog.at_level("WARNING"):
+        _run_frames(runner, pipeline.State.IN_CALL, runner.HOT_INPUT_AFTER_FRAMES)
+
+    assert "hearing the room" in caplog.text
+    assert "run.bat levels" in caplog.text
+
+
+def test_the_warning_is_said_once_not_every_frame(cfg, caplog):
+    runner = pipeline.Runner(cfg)
+    with caplog.at_level("WARNING"):
+        _run_frames(runner, pipeline.State.IN_CALL, runner.HOT_INPUT_AFTER_FRAMES * 3)
+
+    assert caplog.text.count("hearing the room") == 1
+
+
+def test_a_normal_phone_line_is_never_warned_about(cfg, caplog):
+    """Mostly idle with real calls in it -- the expected shape."""
+    runner = pipeline.Runner(cfg)
+    with caplog.at_level("WARNING"):
+        for _ in range(10):
+            _run_frames(runner, pipeline.State.IN_CALL, 1_500)
+            _run_frames(runner, pipeline.State.IDLE, 15_000)
+
+    assert "hearing the room" not in caplog.text
+
+
+def test_it_waits_for_enough_evidence_before_complaining(cfg, caplog):
+    """One long call early on is not proof of anything."""
+    runner = pipeline.Runner(cfg)
+    with caplog.at_level("WARNING"):
+        _run_frames(runner, pipeline.State.IN_CALL, runner.HOT_INPUT_AFTER_FRAMES - 1)
+
+    assert "hearing the room" not in caplog.text
