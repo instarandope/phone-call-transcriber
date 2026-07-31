@@ -12,6 +12,7 @@ speech that triggered it -- otherwise every transcript would open mid-word.
 from __future__ import annotations
 
 import collections
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -220,6 +221,114 @@ class CallDetector:
             self.state = state
             if self.on_state_change:
                 self.on_state_change(state)
+
+
+class ManualDetector:
+    """Records between an explicit start and stop, ignoring the line entirely.
+
+    Automatic detection assumes the loudest thing near the phone is the phone.
+    In a busy workshop or a shared office that is false, and the room triggers
+    recordings that were never calls. This is the answer for those rooms: a
+    hotkey decides, and nothing else does.
+
+    Same interface as CallDetector so the runner does not care which it has.
+    """
+
+    # Below this a recording is treated as a mis-hit rather than a decision --
+    # a double-tap on the hotkey, or a stop that landed early.
+    MIN_S = 2.0
+
+    def __init__(
+        self,
+        cfg,
+        sample_rate: int = 16000,
+        frame_ms: int = 20,
+        on_state_change: Callable[[State], None] | None = None,
+    ):
+        self.cfg = cfg
+        self.sample_rate = sample_rate
+        self.frame_ms = frame_ms
+        self.on_state_change = on_state_change
+        self.state = State.IDLE
+        self.discarded = 0
+
+        self._max_frames = max(1, round(cfg.max_call_s * 1000 / frame_ms))
+        self._recorded: list[np.ndarray] = []
+        self._started_at = 0.0
+        # Set from the hotkey thread, read from the capture thread. An Event is
+        # the whole synchronisation story -- there is nothing else shared.
+        self._want = threading.Event()
+
+    @property
+    def recording(self) -> bool:
+        return self._want.is_set()
+
+    def toggle(self) -> bool:
+        """Flip recording on or off. Returns the new state. Thread-safe."""
+        if self._want.is_set():
+            self._want.clear()
+        else:
+            self._want.set()
+        return self._want.is_set()
+
+    def push(self, frame: np.ndarray) -> Call | None:
+        want = self._want.is_set()
+
+        if self.state is State.IDLE:
+            if not want:
+                return None
+            self._begin()
+
+        self._recorded.append(_as_int16(frame))
+
+        if not want:
+            return self._finish("manual")
+        if len(self._recorded) >= self._max_frames:
+            # Stop asking for more, or the next frame would start a new one.
+            self._want.clear()
+            return self._finish("max_length")
+        return None
+
+    def flush(self) -> Call | None:
+        if self.state is State.IN_CALL:
+            self._want.clear()
+            return self._finish("shutdown")
+        return None
+
+    def _begin(self) -> None:
+        self._recorded = []
+        self._started_at = time.time()
+        self.state = State.IN_CALL
+        if self.on_state_change:
+            self.on_state_change(State.IN_CALL)
+
+    def _finish(self, reason: str) -> Call | None:
+        frames = self._recorded
+        self._recorded = []
+        self.state = State.IDLE
+        if self.on_state_change:
+            self.on_state_change(State.IDLE)
+
+        if not frames:
+            return None
+
+        audio = np.concatenate(frames, axis=0)
+        duration = len(audio) / self.sample_rate
+
+        # The floor only guards against a mis-hit on the hotkey. Hitting the
+        # length cap or shutting down is not a mis-hit, and discarding those
+        # would throw away a recording nobody asked to discard.
+        if reason == "manual" and duration < self.MIN_S:
+            self.discarded += 1
+            return None
+
+        return Call(
+            audio=audio,
+            sample_rate=self.sample_rate,
+            started_at=self._started_at,
+            duration_s=duration,
+            ended_reason=reason,
+        )
 
 
 def _as_int16(frame: np.ndarray) -> np.ndarray:

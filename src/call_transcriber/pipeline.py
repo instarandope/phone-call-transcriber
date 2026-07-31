@@ -23,8 +23,8 @@ from pathlib import Path
 import numpy as np
 
 from . import audio as audio_mod
-from . import extract, notify, storage, transcribe, workorder
-from .vad import Call, CallDetector, State
+from . import extract, hotkey, notify, storage, transcribe, workorder
+from .vad import Call, CallDetector, ManualDetector, State
 
 log = logging.getLogger(__name__)
 
@@ -196,6 +196,27 @@ class Runner:
             max_workers=1, thread_name_prefix="transcribe"
         )
         self._error: Exception | None = None
+        self._detector = None
+        self._hotkey_listener = None
+
+    @property
+    def manual(self) -> bool:
+        return self.cfg.control.mode == "manual"
+
+    def toggle_recording(self) -> bool | None:
+        """Start or stop recording by hand. Returns the new state.
+
+        Called from the hotkey listener thread and from the tray menu. Only
+        does anything in manual mode.
+        """
+        detector = self._detector
+        if detector is None or not hasattr(detector, "toggle"):
+            return None
+        started = detector.toggle()
+        log.info("recording started by hotkey" if started else "recording stopped by hotkey")
+        if self.cfg.control.beep:
+            notify.beep(started)
+        return started
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -205,6 +226,8 @@ class Runner:
 
     def stop(self) -> None:
         self.stop_event.set()
+        hotkey.stop(self._hotkey_listener)
+        self._hotkey_listener = None
         if self._thread is not None:
             self._thread.join(timeout=5)
         self._pool.shutdown(wait=True)
@@ -224,17 +247,34 @@ class Runner:
             )
             log.info("listening on %s", device)
 
-            detector = CallDetector(
+            detector_class = ManualDetector if self.manual else CallDetector
+            detector = detector_class(
                 self.cfg.detect,
                 sample_rate=self.cfg.audio.sample_rate,
                 on_state_change=self._on_state,
             )
+            self._detector = detector
+
+            if self.manual:
+                # Fatal in manual mode: without the hotkey there is no way to
+                # record at all, and failing quietly would look like the audio
+                # is broken.
+                self._hotkey_listener = hotkey.start(
+                    self.cfg.control.hotkey, self.toggle_recording
+                )
 
             with audio_mod.Capture(device, target_rate=self.cfg.audio.sample_rate) as capture:
-                log.info(
-                    "ready -- calls are detected automatically (%s)",
-                    f"{self.cfg.detect.hangup_silence_s:.0f}s of silence ends a call",
-                )
+                if self.manual:
+                    log.info(
+                        "ready -- press %s to start recording, and again to stop",
+                        self.cfg.control.hotkey.upper(),
+                    )
+                else:
+                    log.info(
+                        "ready -- calls are detected automatically (the line going "
+                        "quiet for %.0fs ends one)",
+                        self.cfg.detect.line_dead_s,
+                    )
                 for frame in capture.frames():
                     if self.stop_event.is_set():
                         break
@@ -269,7 +309,7 @@ class Runner:
         if state is State.IN_CALL:
             self._frames_in_call += 1
 
-        if self._warned_hot or self._frames_seen < self.HOT_INPUT_AFTER_FRAMES:
+        if self.manual or self._warned_hot or self._frames_seen < self.HOT_INPUT_AFTER_FRAMES:
             return
         ratio = self._frames_in_call / self._frames_seen
         if ratio < self.HOT_INPUT_RATIO:
@@ -309,4 +349,5 @@ class Runner:
 
     def _on_state(self, state: State) -> None:
         self.state = state
-        log.info("recording started" if state is State.IN_CALL else "call ended")
+        if not self.manual:
+            log.info("recording started" if state is State.IN_CALL else "call ended")

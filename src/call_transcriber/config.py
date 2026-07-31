@@ -60,6 +60,15 @@ class ExtractConfig:
 
 
 @dataclass
+class ControlConfig:
+    # auto   -- the app decides when a call starts and stops
+    # manual -- nothing is recorded until the hotkey is pressed
+    mode: str = "auto"
+    hotkey: str = "ctrl+alt+r"
+    beep: bool = True
+
+
+@dataclass
 class OutputConfig:
     dir: str = "output"
     keep_audio: bool = False
@@ -78,6 +87,7 @@ class BusinessConfig:
 class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
     detect: DetectConfig = field(default_factory=DetectConfig)
+    control: ControlConfig = field(default_factory=ControlConfig)
     transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -139,6 +149,7 @@ def load(path: Path | None = None, root: Path | None = None) -> Config:
     sections = {
         "audio": AudioConfig,
         "detect": DetectConfig,
+        "control": ControlConfig,
         "transcribe": TranscribeConfig,
         "extract": ExtractConfig,
         "output": OutputConfig,
@@ -192,6 +203,21 @@ def _validate(cfg: Config) -> Config:
             f"calls -- using {corrected}"
         )
         cfg.detect.line_dead_dbfs = corrected
+
+    if cfg.control.mode not in ("auto", "manual"):
+        cfg.warnings.append(
+            f"control.mode {cfg.control.mode!r} is not valid -- using 'auto'. "
+            f"Choose 'auto' to detect calls automatically or 'manual' to record "
+            f"only when the hotkey is pressed."
+        )
+        cfg.control.mode = "auto"
+
+    if cfg.control.mode == "manual" and not cfg.control.hotkey.strip():
+        cfg.warnings.append(
+            "control.mode is 'manual' but control.hotkey is empty, which would "
+            "leave no way to record -- using ctrl+alt+r"
+        )
+        cfg.control.hotkey = "ctrl+alt+r"
 
     if cfg.detect.min_call_s > cfg.detect.max_call_s:
         cfg.warnings.append(

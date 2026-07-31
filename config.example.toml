@@ -71,6 +71,28 @@ min_call_s = 10.0
 max_call_s = 3600.0
 
 
+[control]
+# How recording starts and stops.
+#
+#   auto   -- the app listens to the line and decides for itself. Good in a
+#             quiet office. Depends on the phone line being the loudest thing
+#             the adapter can hear.
+#
+#   manual -- nothing is recorded until you press the hotkey, and it keeps
+#             recording until you press it again. Use this in a workshop, a
+#             shop floor, or any room where background noise would otherwise
+#             start recordings that were never calls.
+mode = "auto"
+
+# Works from any window, so you never have to leave what you are doing.
+# Write it the obvious way: "ctrl+alt+r", "ctrl+shift+space", "f9".
+hotkey = "ctrl+alt+r"
+
+# Two rising tones when recording starts, two falling when it stops -- so you
+# can confirm it armed without looking at the screen.
+beep = true
+
+
 [transcribe]
 # faster-whisper model. Telephone audio is narrowband, so bigger is not always
 # better. small.en is the sweet spot on CPU; use distil-large-v3 on a GPU.

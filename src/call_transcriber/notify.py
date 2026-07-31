@@ -37,6 +37,25 @@ class Popup:
     copied: bool = False
 
 
+def beep(started: bool) -> None:
+    """Confirm a hotkey press without needing to look at anything.
+
+    Rising for start, falling for stop, so the two are distinguishable while
+    you are on the phone and looking somewhere else entirely.
+    """
+    try:
+        import winsound
+    except ImportError:
+        return  # not Windows; the tray icon and log still report state
+
+    tones = ((880, 90), (1320, 90)) if started else ((1320, 90), (660, 120))
+    try:
+        for frequency, duration in tones:
+            winsound.Beep(frequency, duration)
+    except Exception as exc:
+        log.debug("could not beep: %s", exc)
+
+
 def copy(text: str) -> bool:
     """Put text on the system clipboard. False if no backend is available."""
     try:

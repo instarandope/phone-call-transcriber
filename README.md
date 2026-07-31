@@ -44,7 +44,23 @@ STILL NEEDED
 Everything runs locally. No audio, no transcript and no customer detail is sent
 anywhere — there is no account, no API key and no cloud service involved.
 
-## Nothing to click
+## Two ways to run it
+
+Set `mode` under `[control]` in `config.toml`.
+
+**`manual`** — a global hotkey (default **Ctrl+Alt+R**) starts recording, and
+pressing it again stops. Two rising beeps confirm the start, two falling ones
+the stop, so you never have to look at the screen. Nothing is recorded until
+you say so.
+
+Use this in a workshop, a shop floor, or any room where people talk near the
+phone. Automatic detection assumes the loudest thing near the adapter is the
+phone; in a noisy room that is false, and you get work orders generated from
+conversations that were never calls.
+
+**`auto`** — the app decides, as described below. Good in a quiet office.
+
+## How auto mode decides
 
 There is no record button. The adapter is live whenever the handset is off the
 cradle, so the app listens to it continuously and works out for itself when a
@@ -230,9 +246,12 @@ backlog is nowhere near your RAM.
 
 ## Changing what it pulls out
 
-Everything the app looks for lives in one file:
-[`src/call_transcriber/fields.py`](src/call_transcriber/fields.py). Each entry
-is a field on the work order. Adding one is a single block:
+Everything the model is asked to find lives in one file:
+[`src/call_transcriber/fields.py`](src/call_transcriber/fields.py). Open it in
+Notepad. Each entry is one field on the work order, and they print in the order
+they appear.
+
+**To capture something new**, add a block anywhere in the list:
 
 ```python
 Field(
@@ -242,13 +261,42 @@ Field(
 ),
 ```
 
-That is the whole change. The instructions given to the model, the JSON it must
-return, and the layout of the printed work order are all generated from that
-list, so nothing else needs editing. Delete an entry and the field disappears
-just as cleanly.
+- `name` — lowercase, no spaces. The key in `extracted.json`.
+- `label` — what prints on the work order.
+- `prompt` — what you are telling the model to look for.
 
-The wording in `prompt` matters — it is passed to the model more or less
-verbatim. Be specific about what counts and what does not.
+That is the whole change. The instructions sent to the model, the JSON schema
+it must fill in, and the printed layout are all generated from this list, so
+nothing else needs editing. Restart the app and the next call has the field.
+
+**To stop capturing something**, delete its block. **To reword something**,
+edit its `prompt`.
+
+**Three kinds of field** are available:
+
+```python
+Field(name="po_number", label="PO NUMBER", prompt="..."),                    # text
+
+Field(name="parts_needed", label="PARTS", prompt="...", kind="list"),        # a list
+
+Field(name="paid", label="PAID", prompt="...",                               # fixed choices
+      kind="enum", choices=("yes", "no", "unknown")),
+```
+
+The wording of `prompt` is what actually does the work — it reaches the model
+close to verbatim. Be specific about what counts and what does not, the way the
+existing entries are. "Any figures quoted or agreed: service call fee, estimate
+range, deposit" gets you far better results than "pricing", because it tells
+the model where the boundary is.
+
+Two things worth knowing:
+
+- The model is instructed never to invent a value. If a caller did not say
+  something, the field comes back empty and its label appears under **STILL
+  NEEDED** instead. That is deliberate — a blank address is a nuisance, a
+  confidently wrong one sends a tech to the wrong house.
+- Adding a lot of fields makes each call slower to process, since the model has
+  more to produce. A dozen is comfortable.
 
 ## What gets saved, and what doesn't
 

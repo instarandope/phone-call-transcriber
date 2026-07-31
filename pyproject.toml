@@ -17,6 +17,7 @@ dependencies = [
     "webrtcvad-wheels>=2.0.14",
     "faster-whisper>=1.0.3",
     "requests>=2.31",
+    "pynput>=1.7.6",
     "pyperclip>=1.8.2",
 ]
 

@@ -48,10 +48,12 @@ def _run(runner, cfg) -> None:
             return image
 
         def status_text(_item):
+            if runner.state is State.IN_CALL:
+                return "RECORDING"
+            if runner.manual:
+                return f"Ready ({runner.calls_handled} recorded today)"
             if runner.paused.is_set():
                 return "Paused"
-            if runner.state is State.IN_CALL:
-                return "Recording a call..."
             return f"Listening ({runner.calls_handled} calls today)"
 
         def toggle_pause(icon, _item):
@@ -77,8 +79,17 @@ def _run(runner, cfg) -> None:
                 pystray.MenuItem(status_text, None, enabled=False),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(
+                    lambda _i: (
+                        "Stop recording" if runner.state is State.IN_CALL
+                        else f"Start recording  ({cfg.control.hotkey.upper()})"
+                    ),
+                    lambda icon, _item: (runner.toggle_recording(), icon.update_menu()),
+                    visible=runner.manual,
+                ),
+                pystray.MenuItem(
                     lambda _i: "Resume" if runner.paused.is_set() else "Pause",
                     toggle_pause,
+                    visible=not runner.manual,
                 ),
                 pystray.MenuItem("Open work orders", open_output),
                 pystray.Menu.SEPARATOR,
