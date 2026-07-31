@@ -22,6 +22,10 @@ class Field:
     choices: tuple[str, ...] = ()
     # Long values print as an indented block instead of on the label line.
     block: bool = False
+    # A job cannot be dispatched without this. If it comes back empty it is
+    # listed under STILL NEEDED whatever the model thinks, because whether a
+    # field is blank is something we know rather than something to ask about.
+    essential: bool = False
 
 
 FIELDS: tuple[Field, ...] = (
@@ -30,12 +34,14 @@ FIELDS: tuple[Field, ...] = (
         label="CUSTOMER",
         prompt="Full name of the person calling. If they give a business name, "
         "include it as 'Name (Business)'.",
+        essential=True,
     ),
     Field(
         name="callback_number",
         label="PHONE",
         prompt="Best callback number, digits as spoken. If they say 'the number "
         "I'm calling from', return null rather than guessing.",
+        essential=True,
     ),
     Field(
         name="service_address",
@@ -44,12 +50,14 @@ FIELDS: tuple[Field, ...] = (
         "city, state and ZIP if stated. This is where the tech drives, which is "
         "not always the caller's own address -- if they mention a rental, a "
         "relative's house, or a second property, use that one.",
+        essential=True,
     ),
     Field(
         name="issue_summary",
         label="ISSUE",
         prompt="The problem in one short line a dispatcher can read at a glance. "
         "No pleasantries, no narrative.",
+        essential=True,
     ),
     Field(
         name="issue_details",
@@ -125,6 +133,7 @@ FIELDS: tuple[Field, ...] = (
 )
 
 BY_NAME = {f.name: f for f in FIELDS}
+ESSENTIAL = tuple(f for f in FIELDS if f.essential)
 SCALAR_FIELDS = tuple(f for f in FIELDS if f.kind != "list")
 LIST_FIELDS = tuple(f for f in FIELDS if f.kind == "list")
 

@@ -387,6 +387,11 @@ Two things worth knowing:
   something, the field comes back empty and its label appears under **STILL
   NEEDED** instead. That is deliberate — a blank address is a nuisance, a
   confidently wrong one sends a tech to the wrong house.
+- Mark a field `essential=True` and it is listed under **STILL NEEDED** whenever
+  it is blank, regardless of what the model reports. Customer, phone, address
+  and issue are marked already. Models will cheerfully write "nothing
+  outstanding" on a call with no name attached, and a checked box that is wrong
+  is worse than no box at all.
 - Adding a lot of fields makes each call slower to process, since the model has
   more to produce. A dozen is comfortable.
 

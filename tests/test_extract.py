@@ -227,11 +227,27 @@ def test_a_slow_model_is_not_retried(monkeypatch, no_waiting):
 # -- the work order must not contradict itself -----------------------------
 
 
+def with_essentials(**overrides):
+    """A result with the four dispatch-critical fields filled.
+
+    Those are always added to missing_info when blank, so tests about anything
+    else start from them being present -- otherwise every assertion carries
+    four unrelated labels.
+    """
+    data = extract.empty_result()
+    data.update({
+        "caller_name": "Roomie",
+        "callback_number": "204-962-2241",
+        "service_address": "19 West Grove Bay, Mitchell, Manitoba",
+        "issue_summary": "Door not closing",
+    })
+    data.update(overrides)
+    return data
+
+
 def test_a_field_that_was_captured_is_not_also_still_needed():
     """The reported bug: ADDRESS filled in, and listed under STILL NEEDED."""
-    data = extract.empty_result()
-    data["service_address"] = "19 West Grove Bay, Mitchell, Manitoba"
-    data["callback_number"] = "204 962 2241"
+    data = with_essentials(caller_name=None)
     data["missing_info"] = ["service_address", "callback_number", "caller_name"]
 
     out = extract._reconcile(data)
@@ -240,36 +256,35 @@ def test_a_field_that_was_captured_is_not_also_still_needed():
 
 
 def test_field_names_become_the_labels_that_are_printed():
-    data = extract.empty_result()
+    data = with_essentials(callback_number=None, service_address=None)
     data["missing_info"] = ["callback_number", "service_address"]
 
     assert extract._reconcile(data)["missing_info"] == ["PHONE", "ADDRESS"]
 
 
 def test_labels_the_model_already_got_right_are_left_alone():
-    data = extract.empty_result()
+    data = with_essentials(callback_number=None, service_address=None)
     data["missing_info"] = ["PHONE", "ADDRESS"]
 
     assert extract._reconcile(data)["missing_info"] == ["PHONE", "ADDRESS"]
 
 
 def test_a_field_named_by_its_label_is_still_dropped_when_captured():
-    data = extract.empty_result()
-    data["callback_number"] = "204 962 2241"
+    data = with_essentials()
     data["missing_info"] = ["PHONE"]
 
     assert extract._reconcile(data)["missing_info"] == []
 
 
 def test_an_unknown_enum_still_counts_as_missing():
-    data = extract.empty_result()
+    data = with_essentials()
     data["missing_info"] = ["urgency"]
 
     assert extract._reconcile(data)["missing_info"] == ["URGENCY"]
 
 
 def test_free_text_the_model_invented_survives():
-    data = extract.empty_result()
+    data = with_essentials()
     data["missing_info"] = ["Whether the opener is under warranty"]
 
     assert extract._reconcile(data)["missing_info"] == [
@@ -278,7 +293,7 @@ def test_free_text_the_model_invented_survives():
 
 
 def test_duplicates_are_collapsed():
-    data = extract.empty_result()
+    data = with_essentials(caller_name=None)
     data["missing_info"] = ["caller_name", "CUSTOMER", "caller name"]
 
     assert extract._reconcile(data)["missing_info"] == ["CUSTOMER"]
@@ -325,3 +340,35 @@ def test_untagged_prose_before_the_json_still_parses():
 
 def test_something_with_no_json_at_all_is_left_alone_to_fail_loudly():
     assert extract._strip_reasoning("I cannot answer that") == "I cannot answer that"
+
+
+# -- what is missing is arithmetic, not a question for the model -----------
+
+
+def test_a_blank_customer_is_flagged_even_when_the_model_says_all_is_well():
+    """gemma4 reported "nothing outstanding" on a call with no name on it."""
+    data = with_essentials(caller_name=None)
+    data["missing_info"] = []
+
+    assert extract._reconcile(data)["missing_info"] == ["CUSTOMER"]
+
+
+def test_every_essential_field_is_covered():
+    out = extract._reconcile(extract.empty_result())
+    assert out["missing_info"] == ["CUSTOMER", "PHONE", "ADDRESS", "ISSUE"]
+
+
+def test_nothing_is_added_when_the_essentials_are_all_there():
+    assert extract._reconcile(with_essentials())["missing_info"] == []
+
+
+def test_an_essential_field_is_not_listed_twice():
+    data = with_essentials(caller_name=None)
+    data["missing_info"] = ["caller_name", "CUSTOMER"]
+
+    assert extract._reconcile(data)["missing_info"] == ["CUSTOMER"]
+
+
+def test_non_essential_gaps_are_still_left_to_the_model():
+    """Not every blank matters -- an empty PRICING is usually just no quote."""
+    assert "PRICING" not in extract._reconcile(with_essentials())["missing_info"]

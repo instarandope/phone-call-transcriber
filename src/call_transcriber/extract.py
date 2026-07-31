@@ -170,6 +170,13 @@ def _reconcile(data: dict) -> dict:
         if label not in cleaned:
             cleaned.append(label)
 
+    # Add anything essential the model failed to flag. Left to itself a model
+    # will report "nothing outstanding" on a call with no customer name on it,
+    # which is worse than saying nothing -- it reads as a checked box.
+    for f in fields.ESSENTIAL:
+        if f.name not in captured and f.label not in cleaned:
+            cleaned.append(f.label)
+
     data["missing_info"] = cleaned
     return data
 
