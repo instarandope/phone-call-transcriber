@@ -134,3 +134,89 @@ def test_business_name_is_passed_so_it_isnt_mistaken_for_the_customer():
 
 def test_empty_transcript_short_circuits_without_a_request():
     assert extract.extract("   ", cfg=None) == extract.empty_result()
+
+
+# -- waiting for Ollama to come up -----------------------------------------
+
+
+class _Cfg:
+    base_url = "http://127.0.0.1:11434"
+    model = "gemma3:4b"
+    temperature = 0.0
+    num_ctx = 8192
+    chunk_chars = 12000
+    timeout_s = 180
+
+
+@pytest.fixture
+def no_waiting(monkeypatch):
+    """Keep the retry logic, drop the sleeps."""
+    monkeypatch.setattr(extract.time, "sleep", lambda _s: None)
+
+
+def test_a_server_that_comes_up_late_is_waited_for(monkeypatch, no_waiting):
+    """The reboot case: the app is ready before Ollama has finished starting."""
+    import requests
+
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise requests.ConnectionError("connection refused")
+        return "the response"
+
+    monkeypatch.setattr(extract.requests, "post", flaky)
+
+    assert extract._post("http://x/api/chat", {}, _Cfg()) == "the response"
+    assert calls["n"] == 3
+
+
+def test_giving_up_says_the_transcript_survived(monkeypatch, no_waiting):
+    import requests
+
+    monkeypatch.setattr(
+        extract.requests, "post",
+        lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError("refused")),
+    )
+
+    with pytest.raises(extract.ExtractionError) as exc:
+        extract._post("http://x/api/chat", {}, _Cfg())
+
+    assert "system tray" in str(exc.value)
+    assert "still saved" in str(exc.value)
+
+
+def test_it_does_not_retry_forever(monkeypatch, no_waiting):
+    import requests
+
+    calls = {"n": 0}
+
+    def always_refuse(*args, **kwargs):
+        calls["n"] += 1
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(extract.requests, "post", always_refuse)
+
+    with pytest.raises(extract.ExtractionError):
+        extract._post("http://x/api/chat", {}, _Cfg())
+
+    assert calls["n"] == len(extract.CONNECT_RETRY_DELAYS) + 1
+
+
+def test_a_slow_model_is_not_retried(monkeypatch, no_waiting):
+    """It answered, it is just slow -- retrying only makes the wait longer."""
+    import requests
+
+    calls = {"n": 0}
+
+    def slow(*args, **kwargs):
+        calls["n"] += 1
+        raise requests.Timeout("too slow")
+
+    monkeypatch.setattr(extract.requests, "post", slow)
+
+    with pytest.raises(extract.ExtractionError, match="took longer than"):
+        extract._post("http://x/api/chat", {}, _Cfg())
+
+    assert calls["n"] == 1

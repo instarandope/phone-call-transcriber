@@ -228,6 +228,23 @@ doing anything — particularly when running hidden, where there is no console
 for a message to appear in. If it cannot start at all, it says so in a dialog
 box rather than failing silently.
 
+### After a restart
+
+The transcriber starts itself, if you let `install.bat` add it to startup. It
+loads the speech model from local cache, and the adapter is just a USB device,
+so nothing else is needed on that side.
+
+**Ollama is a separate program with its own startup entry.** Its installer
+normally adds one, but it is worth confirming once: restart, and look for the
+llama icon in the notification area. If it is missing, Task Manager →
+**Startup apps** → enable Ollama.
+
+Even when both start automatically they start at the same time, and the
+transcriber is usually ready first. That is handled — if Ollama is not
+answering, extraction waits and retries for up to 50 seconds rather than giving
+up. And if it never answers, the transcript is still saved; only the field
+extraction is lost, and the work order says so.
+
 ## The double-clickable scripts
 
 Everything can be run by double-clicking, so you never need a terminal:

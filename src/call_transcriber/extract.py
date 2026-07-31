@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 import requests
 
@@ -107,6 +108,46 @@ def extract(transcript_text: str, cfg, business=None) -> dict:
 # -- one round trip --------------------------------------------------------
 
 
+# Ollama is a separate program with its own startup entry, so after a reboot it
+# may still be coming up when the first call is processed -- or someone may have
+# quit it from the tray. Waiting is far better than losing the extraction, since
+# processing happens in the background where nobody is watching a clock.
+CONNECT_RETRY_DELAYS = (5, 15, 30)
+
+
+def _post(url: str, payload: dict, cfg):
+    """POST to Ollama, waiting it out if the server is not up yet."""
+    last: Exception | None = None
+
+    for attempt, delay in enumerate((0, *CONNECT_RETRY_DELAYS)):
+        if delay:
+            log.warning(
+                "Ollama is not answering at %s -- waiting %ds and trying again "
+                "(%d of %d). If it was just started, it is probably still loading.",
+                cfg.base_url, delay, attempt, len(CONNECT_RETRY_DELAYS),
+            )
+            time.sleep(delay)
+        try:
+            return requests.post(url, json=payload, timeout=cfg.timeout_s)
+        except requests.Timeout as exc:
+            # It answered, it is just slow. Retrying would only take longer.
+            raise ExtractionError(
+                f"the local model took longer than {cfg.timeout_s}s. Try a smaller "
+                f"model in [extract] (gemma3:1b) or raise extract.timeout_s."
+            ) from exc
+        except requests.ConnectionError as exc:
+            last = exc
+        except requests.RequestException as exc:
+            raise ExtractionError(f"could not reach Ollama at {cfg.base_url} ({exc})") from exc
+
+    waited = sum(CONNECT_RETRY_DELAYS)
+    raise ExtractionError(
+        f"Ollama did not answer at {cfg.base_url} after waiting {waited}s ({last}). "
+        f"Open Ollama from the Start menu -- it lives in the system tray -- and the "
+        f"transcript of this call is still saved, so nothing was lost."
+    )
+
+
 def _extract_one(text: str, cfg, business, part: tuple[int, int] | None) -> dict:
     user = _user_prompt(text, business, part)
     payload = {
@@ -123,19 +164,7 @@ def _extract_one(text: str, cfg, business, part: tuple[int, int] | None) -> dict
         },
     }
 
-    try:
-        resp = requests.post(
-            f"{cfg.base_url}/api/chat", json=payload, timeout=cfg.timeout_s
-        )
-    except requests.Timeout as exc:
-        raise ExtractionError(
-            f"the local model took longer than {cfg.timeout_s}s. Try a smaller "
-            f"model in [extract] (gemma3:1b) or raise extract.timeout_s."
-        ) from exc
-    except requests.RequestException as exc:
-        raise ExtractionError(
-            f"cannot reach Ollama at {cfg.base_url} ({exc}). Is it running?"
-        ) from exc
+    resp = _post(f"{cfg.base_url}/api/chat", payload, cfg)
 
     if resp.status_code == 404:
         raise ExtractionError(
