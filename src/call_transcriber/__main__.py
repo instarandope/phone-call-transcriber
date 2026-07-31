@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_devices()
     if args.command == "doctor":
         return _cmd_doctor(cfg)
+    if args.command == "prompt":
+        return _cmd_prompt(cfg)
     if args.command == "levels":
         return _cmd_levels(cfg, args.seconds)
     if args.command == "test":
@@ -60,6 +62,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("devices", help="list audio input devices")
     sub.add_parser("doctor", help="check the setup")
+    sub.add_parser("prompt", help="show exactly what the model is told to extract")
     levels = sub.add_parser("levels", help="measure your line and suggest thresholds")
     levels.add_argument(
         "--seconds", type=int, default=45, help="how long to listen (default 45)"
@@ -188,6 +191,39 @@ def _cmd_devices() -> int:
     print("`run.bat levels` and talk into the handset. If the meter moves, it is the")
     print("right one. If two different devices share a name, set audio.device_index")
     print("to one of the numbers above instead.")
+    return 0
+
+
+def _cmd_prompt(cfg) -> int:
+    """Print the instructions the model actually receives.
+
+    Editing fields.py changes the prompt indirectly, which makes it easy to
+    write something you think is clear and never see how it reads in context.
+    """
+    from . import extract, fields
+
+    print("=" * 72)
+    print("STANDING RULES  (edit in src/call_transcriber/extract.py)")
+    print("=" * 72)
+    print(extract.SYSTEM_PROMPT)
+
+    if cfg.business.name or cfg.business.default_service_area:
+        print("=" * 72)
+        print("YOUR BUSINESS  (edit under [business] in config.toml)")
+        print("=" * 72)
+        if cfg.business.name:
+            print(f"  {cfg.business.name}")
+        if cfg.business.default_service_area:
+            print(f"  serving {cfg.business.default_service_area}")
+        print()
+
+    print("=" * 72)
+    print(f"FIELDS TO EXTRACT  ({len(fields.FIELDS)} of them)")
+    print("edit in src/call_transcriber/fields.py")
+    print("=" * 72)
+    print(fields.instructions())
+    print()
+    print(f"Model: {cfg.extract.model}")
     return 0
 
 

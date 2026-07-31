@@ -240,6 +240,7 @@ Everything can be run by double-clicking, so you never need a terminal:
 | **`devices.bat`** | List audio inputs, to find the adapter's name for `config.toml`. |
 | **`doctor.bat`** | Check everything: packages, adapter, models, output folder. |
 | **`levels.bat`** | Meter the phone line and print the threshold values to use. |
+| **`prompt.bat`** | Show exactly what the model is told to extract from a call. |
 
 The less common ones need a terminal, because they take an argument. Open the
 folder in File Explorer, click the address bar, type `cmd` and press Enter — a
@@ -291,6 +292,18 @@ Queued calls hold their audio in memory, around 2 MB per minute. Even a deep
 backlog is nowhere near your RAM.
 
 ## Changing what it pulls out
+
+Double-click **`prompt.bat`** to see exactly what the model is told, assembled
+the way it actually receives it. Worth doing before and after any edit —
+instructions that read clearly in isolation often read differently next to the
+other fourteen.
+
+The instructions come from two places:
+
+| Where | What it holds |
+|---|---|
+| **`src/call_transcriber/fields.py`** | What to look for. One block per field. This is the one you will edit. |
+| **`src/call_transcriber/extract.py`** | The standing rules that apply to every field — never invent a value, strip the small talk, quote numbers exactly as spoken. Change these only to alter behaviour across the board. |
 
 Everything the model is asked to find lives in one file:
 [`src/call_transcriber/fields.py`](src/call_transcriber/fields.py). Open it in
