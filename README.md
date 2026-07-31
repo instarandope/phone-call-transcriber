@@ -119,6 +119,22 @@ should stay flat, even when you talk in the room. Lift the handset and it
 should jump on dial tone. Try both switch positions and keep the one that
 behaves that way. If neither does, the adapter is on the wrong jack.
 
+**Then check the switch with the dial, which is the faster test.** Record a
+call with `keep_audio = true`, play it back, and turn the record level dial
+while listening:
+
+- **Both voices change level** → correct position. The adapter is on the line.
+- **Only your own voice changes** → wrong position. That one taps the
+  mouthpiece alone, and every transcript will be missing the customer.
+
+The second case is the dangerous one, because it produces transcripts that look
+fine until you notice the only half present is yours. Nothing in the audio
+announces it — you have to go looking.
+
+Aim for speech peaking around **-12 dBFS**. Too far right is worse than too far
+left: clipping destroys the waveform, and whisper copes with a quiet recording
+far better than a distorted one. The app warns about both after each call.
+
 ## Setting it up
 
 Double-click **`install.bat`**. It creates the Python environment, installs
