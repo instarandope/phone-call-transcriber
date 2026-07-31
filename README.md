@@ -463,6 +463,11 @@ vocabulary = "torsion spring, cables, rollers, tracks, panels, opener, keypad, d
 Add whatever you see misheard. This costs nothing at runtime and is usually
 more effective than moving up a model size.
 
+Note that `vocabulary` only affects **new** transcriptions. Running `compare`
+against a saved `transcript.txt` replays the transcript as it was recorded, so
+a mishearing already baked into it stays there — take a fresh call to see the
+difference.
+
 **Only then reach for a bigger model**, and measure rather than guess. Keep one
 call with `keep_audio = true` and run it through several:
 

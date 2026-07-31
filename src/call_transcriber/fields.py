@@ -93,13 +93,17 @@ FIELDS: tuple[Field, ...] = (
         name="availability",
         label="AVAILABLE",
         prompt="When the caller said they can be there, in their own terms "
-        "(e.g. 'weekday mornings', 'after 3pm Thursday').",
+        "(e.g. 'weekday mornings', 'after 3pm Thursday'). This is their general "
+        "availability, not the slot that was booked -- that goes in appointment.",
     ),
     Field(
         name="appointment",
         label="SCHEDULED",
-        prompt="The specific date and time actually agreed on during the call, if "
-        "one was. Null if nothing was booked.",
+        prompt="The date and time finally agreed on. Booking a job is usually a "
+        "negotiation -- a time is offered, turned down, another is offered, and "
+        "one is settled on. Record the LAST time both sides accepted, not the "
+        "first one mentioned, and check nothing later in the call overrides it. "
+        "Null if nothing was booked.",
     ),
     Field(
         name="existing_customer",

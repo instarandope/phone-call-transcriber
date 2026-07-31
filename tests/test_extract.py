@@ -405,3 +405,10 @@ def test_the_standing_rule_covers_staff_nobody_listed():
     """Whoever answers by naming the business is staff, listed or not."""
     assert "naming the business" in extract.SYSTEM_PROMPT
     assert "STAFF" in extract.SYSTEM_PROMPT
+
+
+def test_the_appointment_field_asks_for_the_final_agreed_time():
+    """A booking is a negotiation; the first time offered is usually wrong."""
+    prompt = fields.BY_NAME["appointment"].prompt
+    assert "LAST time both sides accepted" in prompt
+    assert "not the first one mentioned" in prompt
