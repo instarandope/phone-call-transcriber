@@ -469,12 +469,22 @@ def _bar(level: float, width: int = 40) -> str:
     return "[" + "#" * filled + "-" * (width - filled) + "]"
 
 
-def _latest_recording(cfg) -> Path | None:
-    """The most recently kept call, so comparing needs no path typed out."""
-    kept = list(cfg.output_dir.rglob("call.wav"))
-    if not kept:
-        return None
-    return max(kept, key=lambda p: p.stat().st_mtime)
+TEXT_SUFFIXES = {".txt", ".md"}
+
+
+def _latest_input(cfg) -> Path | None:
+    """Newest transcript, or failing that newest kept recording.
+
+    Transcripts are preferred and are what this defaults to: comparing
+    extraction models only needs the text, and transcripts are saved for every
+    call while audio is deleted unless keep_audio is on. Re-transcribing to
+    compare a step that never sees the audio is wasted minutes.
+    """
+    for pattern in ("transcript.txt", "call.wav"):
+        found = list(cfg.output_dir.rglob(pattern))
+        if found:
+            return max(found, key=lambda p: p.stat().st_mtime)
+    return None
 
 
 def _cmd_compare(cfg, path: Path | None, models: str) -> int:
@@ -491,16 +501,15 @@ def _cmd_compare(cfg, path: Path | None, models: str) -> int:
     from . import extract, storage, transcribe, workorder
 
     if path is None:
-        path = _latest_recording(cfg)
+        path = _latest_input(cfg)
         if path is None:
             print(
-                "No saved recordings to compare against.\n\n"
-                "  Comparing models needs one call to run through all of them. Set\n"
-                "  keep_audio = true under [output] in config.toml, take a call, then\n"
-                "  run this again. Turn keep_audio back off afterwards."
+                "Nothing to compare against yet.\n\n"
+                "  This needs one call's transcript. Take a call, then run it again --\n"
+                "  or point it at any transcript.txt, or at a saved recording."
             )
             return 1
-        print(f"Using the most recent kept call: {path}\n")
+        print(f"Using {path}\n")
 
     if not path.exists():
         print(f"error: {path} does not exist")
@@ -511,16 +520,22 @@ def _cmd_compare(cfg, path: Path | None, models: str) -> int:
         print("error: --models is empty")
         return 1
 
-    audio, rate = storage.read_wav(path)
-    print(f"Transcribing {path.name} once with {cfg.transcribe.model} ...")
-    started = _time.monotonic()
-    result = transcribe.transcribe(audio, rate, cfg.transcribe, cfg.audio.stereo_mode)
-    transcribe_s = _time.monotonic() - started
+    duration_s = None
+    if path.suffix.lower() in TEXT_SUFFIXES:
+        transcript_text = path.read_text(encoding="utf-8").strip()
+        print(f"Read {len(transcript_text)} characters of transcript.\n")
+    else:
+        audio, rate = storage.read_wav(path)
+        print(f"Transcribing {path.name} once with {cfg.transcribe.model} ...")
+        started = _time.monotonic()
+        result = transcribe.transcribe(audio, rate, cfg.transcribe, cfg.audio.stereo_mode)
+        transcript_text = result.text
+        duration_s = result.duration_s
+        print(f"  {_time.monotonic() - started:.0f}s, {len(result.segments)} segments\n")
 
-    if result.is_empty:
-        print("Nothing was transcribed, so there is nothing to compare.")
+    if not transcript_text:
+        print("That transcript is empty, so there is nothing to compare.")
         return 1
-    print(f"  {transcribe_s:.0f}s, {len(result.segments)} segments\n")
 
     scored = []
     for model in wanted:
@@ -532,13 +547,13 @@ def _cmd_compare(cfg, path: Path | None, models: str) -> int:
         settings.model = model
         started = _time.monotonic()
         try:
-            data = extract.extract(result.text, settings, cfg.business)
+            data = extract.extract(transcript_text, settings, cfg.business)
         except extract.ExtractionError as exc:
             print(f"  failed: {exc}\n")
             continue
         elapsed = _time.monotonic() - started
 
-        print(workorder.render(data, duration_s=result.duration_s, business=cfg.business))
+        print(workorder.render(data, duration_s=duration_s, business=cfg.business))
         filled = sum(
             1 for f in fields_with_values(data)
         )
