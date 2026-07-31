@@ -25,10 +25,16 @@ class AudioConfig:
 class DetectConfig:
     vad_aggressiveness: int = 2
     speech_trigger_ms: int = 300
-    hangup_silence_s: float = 6.0
+    # Long on purpose. This is the fallback for ending a call, not the primary
+    # one -- line_dead_* below is what normally detects a hangup. A short value
+    # here splits calls in half whenever someone goes quiet for a moment.
+    hangup_silence_s: float = 45.0
     min_call_s: float = 10.0
     max_call_s: float = 3600.0
     noise_floor_dbfs: float = -50.0
+    # The line going properly silent means the handset is back on the cradle.
+    line_dead_dbfs: float = -60.0
+    line_dead_s: float = 3.0
 
 
 @dataclass
@@ -171,6 +177,18 @@ def _validate(cfg: Config) -> Config:
             f"audio.stereo_mode {cfg.audio.stereo_mode!r} is not valid -- using 'auto'"
         )
         cfg.audio.stereo_mode = "auto"
+
+    # The dead-line threshold has to sit below the speech threshold. If it were
+    # above, an ordinary pause in conversation would register as a hangup and
+    # every call would be chopped into pieces.
+    if cfg.detect.line_dead_dbfs >= cfg.detect.noise_floor_dbfs:
+        corrected = cfg.detect.noise_floor_dbfs - 10.0
+        cfg.warnings.append(
+            f"detect.line_dead_dbfs ({cfg.detect.line_dead_dbfs}) must be below "
+            f"noise_floor_dbfs ({cfg.detect.noise_floor_dbfs}), or pauses would end "
+            f"calls -- using {corrected}"
+        )
+        cfg.detect.line_dead_dbfs = corrected
 
     if cfg.detect.min_call_s > cfg.detect.max_call_s:
         cfg.warnings.append(

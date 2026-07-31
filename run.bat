@@ -3,7 +3,9 @@ REM Start the transcriber. Any arguments are passed through, so:
 REM   run.bat            listen for calls
 REM   run.bat devices    list audio inputs
 REM   run.bat doctor     check the setup
+REM   run.bat levels     measure your line, get threshold values
 REM   run.bat test x.wav process an existing recording
+REM   run.bat purge      securely delete any kept recordings
 
 cd /d "%~dp0"
 

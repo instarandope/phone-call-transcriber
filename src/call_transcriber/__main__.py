@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_devices()
     if args.command == "doctor":
         return _cmd_doctor(cfg)
+    if args.command == "levels":
+        return _cmd_levels(cfg, args.seconds)
     if args.command == "test":
         return _cmd_test(cfg, Path(args.file))
     if args.command == "purge":
@@ -52,6 +54,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--tray", action="store_true", help="show a system tray icon")
     sub.add_parser("devices", help="list audio input devices")
     sub.add_parser("doctor", help="check the setup")
+    levels = sub.add_parser("levels", help="measure your line and suggest thresholds")
+    levels.add_argument(
+        "--seconds", type=int, default=45, help="how long to listen (default 45)"
+    )
     test = sub.add_parser("test", help="process an existing audio file")
     test.add_argument("file", help="path to a .wav/.mp3/.m4a recording")
     purge = sub.add_parser("purge", help="securely delete kept recordings")
@@ -215,6 +221,98 @@ def _cmd_test(cfg, path: Path) -> int:
     if result.folder:
         print(f"saved to {result.folder}")
     return 0
+
+
+def _cmd_levels(cfg, seconds: int) -> int:
+    """Measure the line so the two thresholds come from real numbers.
+
+    The whole call-detection scheme rests on one assumption: an open line is
+    measurably louder than a closed one, even when nobody is speaking. This
+    checks that on your actual phone and tells you where to put the thresholds.
+    """
+    import time
+
+    import numpy as np
+
+    from . import audio
+
+    try:
+        device = audio.find_device(cfg.audio.device_match)
+    except audio.AudioError as exc:
+        print(f"error: {exc}")
+        return 1
+
+    print(f"Listening on {device} for {seconds} seconds.\n")
+    print("  Spend roughly a third of the time on each of these:")
+    print("    1. handset ON the cradle, don't touch it")
+    print("    2. handset lifted, say nothing")
+    print("    3. handset lifted, talk normally\n")
+    print("  Starting now.\n")
+
+    frame_ms = 20
+    per_window = max(1, int(500 / frame_ms))
+    levels: list[float] = []
+    window: list[float] = []
+    deadline = time.monotonic() + seconds
+
+    try:
+        with audio.Capture(device, target_rate=cfg.audio.sample_rate) as capture:
+            for frame in capture.frames():
+                value = audio.dbfs(frame)
+                window.append(value if np.isfinite(value) else -100.0)
+                if len(window) >= per_window:
+                    level = float(np.mean(window))
+                    levels.append(level)
+                    print(f"  {_bar(level)} {level:7.1f} dBFS")
+                    window = []
+                if time.monotonic() >= deadline:
+                    break
+    except audio.AudioError as exc:
+        print(f"error: {exc}")
+        return 1
+    except KeyboardInterrupt:
+        print("\n  stopped early")
+
+    if len(levels) < 10:
+        print("\nNot enough audio was captured to suggest anything.")
+        return 1
+
+    quiet = float(np.percentile(levels, 10))
+    loud = float(np.percentile(levels, 90))
+    spread = loud - quiet
+
+    print(f"\n  Quietest (10th pct): {quiet:7.1f} dBFS")
+    print(f"  Loudest  (90th pct): {loud:7.1f} dBFS")
+    print(f"  Spread:              {spread:7.1f} dB\n")
+
+    if spread < 10:
+        print(
+            "The quiet and loud levels are too close together for the adapter to\n"
+            "tell an open line from a closed one. Check that the handset cord runs\n"
+            "through the adapter, and that Windows input volume for it isn't at\n"
+            "either extreme. Re-run this once the spread is at least 15 dB."
+        )
+        return 1
+
+    dead = round(quiet + 4)
+    floor = round(max(quiet + 10, (quiet + loud) / 2))
+
+    print("Put these in config.toml under [detect]:\n")
+    print(f"    noise_floor_dbfs = {floor}.0")
+    print(f"    line_dead_dbfs = {dead}.0\n")
+    print(
+        "  noise_floor_dbfs is the level speech has to beat to start a recording.\n"
+        "  line_dead_dbfs is the level below which the line counts as hung up.\n"
+        "  If calls end while someone is just thinking, lower line_dead_dbfs.\n"
+        "  If recordings start when nobody called, raise noise_floor_dbfs."
+    )
+    return 0
+
+
+def _bar(level: float, width: int = 40) -> str:
+    """A meter from -80 dBFS to 0."""
+    filled = int(max(0.0, min(1.0, (level + 80) / 80)) * width)
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
 
 
 def _cmd_purge(cfg, everything: bool) -> int:

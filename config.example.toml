@@ -26,9 +26,32 @@ vad_aggressiveness = 2
 # Continuous speech required before we decide a call has started.
 speech_trigger_ms = 300
 
-# Silence required before we decide the call has ended and start processing.
-# Raise this if long pauses are cutting your calls in half.
-hangup_silence_s = 6.0
+# ---------------------------------------------------------------------------
+# Ending a call. Run `run.bat levels` to get the right numbers for your line
+# instead of guessing -- it measures your actual phone and prints them.
+#
+# There are two thresholds because "nobody is talking" and "the call is over"
+# are different things. An open phone line always carries some noise, so when a
+# caller goes quiet to look something up, the level drops but does not vanish.
+# It only vanishes when the handset goes back on the cradle.
+# ---------------------------------------------------------------------------
+
+# Below this level, the line counts as hung up. This is what normally ends a
+# call, and it should sit BELOW noise_floor_dbfs. Lower it if calls are ending
+# while someone is just thinking.
+line_dead_dbfs = -60.0
+
+# How long the line must stay dead before we act on it.
+line_dead_s = 3.0
+
+# Fallback: no speech at all for this long ends the call, however loud the line
+# is. Only fires on lines that stay noisy after the far end hangs up. It is
+# deliberately long -- a short value here is what chops one call into two.
+hangup_silence_s = 45.0
+
+# Frames quieter than this are never treated as speech, regardless of what
+# the VAD says. Guards against line hiss triggering a recording.
+noise_floor_dbfs = -50.0
 
 # Calls shorter than this are discarded as false triggers (line noise, a
 # handset knocked off the cradle, a wrong number).
@@ -36,10 +59,6 @@ min_call_s = 10.0
 
 # Hard stop, so a handset left off-hook can't record forever.
 max_call_s = 3600.0
-
-# Frames quieter than this are never treated as speech, regardless of what
-# the VAD says. Guards against line hiss triggering a recording.
-noise_floor_dbfs = -50.0
 
 
 [transcribe]

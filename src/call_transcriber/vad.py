@@ -101,10 +101,12 @@ class CallDetector:
             maxlen=max(1, round(self.PREROLL_S * frames_per_s))
         )
         self._hangup_frames = max(1, round(cfg.hangup_silence_s * frames_per_s))
+        self._dead_frames = max(1, round(cfg.line_dead_s * frames_per_s))
         self._max_frames = max(1, round(cfg.max_call_s * frames_per_s))
 
         self._recorded: list[np.ndarray] = []
         self._silence_run = 0
+        self._dead_run = 0
         self._started_at = 0.0
         self._last_end_at = 0.0
         self.discarded = 0  # calls dropped for being too short
@@ -113,7 +115,8 @@ class CallDetector:
 
     def push(self, frame: np.ndarray) -> Call | None:
         """Feed one frame. Returns a Call on the frame where one completes."""
-        voiced = self._is_speech(frame)
+        level = dbfs(frame)
+        voiced = self._is_speech(frame, level)
 
         if self.state is State.IDLE:
             self._preroll.append(frame)
@@ -123,13 +126,23 @@ class CallDetector:
             return None
 
         self._recorded.append(_as_int16(frame))
-        if voiced:
-            self._silence_run = 0
-        else:
-            self._silence_run += 1
+        self._silence_run = 0 if voiced else self._silence_run + 1
+        self._dead_run = self._dead_run + 1 if level < self.cfg.line_dead_dbfs else 0
 
+        # An open phone line is never digitally silent -- there is always line
+        # noise and room tone coming through the handset. So "nobody is
+        # talking" and "the handset went back on the cradle" are different
+        # signals, and only the second one means the call is over.
+        #
+        # Ending on the dead line is what makes a long pause safe: someone
+        # walking off to read a model number off the water heater leaves the
+        # line open, so the recording keeps running.
+        if self._dead_run >= self._dead_frames:
+            return self._finish("hangup", trim=self._dead_run)
+        # Fallback for lines that stay noisy after the other end hangs up, or
+        # a handset left off the cradle in a quiet room. Deliberately long.
         if self._silence_run >= self._hangup_frames:
-            return self._finish("silence")
+            return self._finish("silence", trim=self._silence_run)
         if len(self._recorded) >= self._max_frames:
             return self._finish("max_length")
         return None
@@ -142,10 +155,10 @@ class CallDetector:
 
     # -- internals ---------------------------------------------------------
 
-    def _is_speech(self, frame: np.ndarray) -> bool:
+    def _is_speech(self, frame: np.ndarray, level: float) -> bool:
         # The energy gate comes first and is the important one. webrtcvad will
         # happily label steady line hiss as speech; a level check will not.
-        if dbfs(frame) < self.cfg.noise_floor_dbfs:
+        if level < self.cfg.noise_floor_dbfs:
             return False
         try:
             return self._vad.is_speech(to_mono_int16(frame), self.sample_rate)
@@ -159,6 +172,7 @@ class CallDetector:
         self._preroll.clear()
         self._trigger.clear()
         self._silence_run = 0
+        self._dead_run = 0
         # The pre-roll means the recording begins before the speech that
         # triggered it, so wind the timestamp back by the same amount -- but
         # never past the end of the previous call, or two calls would appear to
@@ -167,7 +181,7 @@ class CallDetector:
         self._started_at = max(rewound, self._last_end_at)
         self._set_state(State.IN_CALL)
 
-    def _finish(self, reason: str) -> Call | None:
+    def _finish(self, reason: str, trim: int = 0) -> Call | None:
         frames = self._recorded
         self._recorded = []
         self._trigger.clear()
@@ -177,15 +191,16 @@ class CallDetector:
         if not frames:
             return None
 
-        # Drop the trailing silence that ended the call, but leave half a
-        # second so the last word doesn't get clipped.
-        keep_tail = max(0, self._silence_run - round(0.5 * 1000 / self.frame_ms))
-        if reason == "silence" and keep_tail:
+        # Drop the trailing quiet that ended the call, but leave half a second
+        # so the last word doesn't get clipped.
+        keep_tail = max(0, trim - round(0.5 * 1000 / self.frame_ms))
+        if keep_tail:
             frames = frames[:-keep_tail] or frames[:1]
 
         audio = np.concatenate(frames, axis=0)
         duration = len(audio) / self.sample_rate
         self._silence_run = 0
+        self._dead_run = 0
         self._last_end_at = self._started_at + duration
 
         if duration < self.cfg.min_call_s:

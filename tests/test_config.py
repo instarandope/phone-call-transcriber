@@ -62,6 +62,30 @@ def test_out_of_range_values_are_clamped(tmp_path):
     assert len(cfg.warnings) == 2
 
 
+def test_a_dead_line_threshold_above_the_speech_floor_is_corrected(tmp_path):
+    """Otherwise an ordinary pause reads as a hangup and chops every call up."""
+    (tmp_path / "config.toml").write_text(
+        "[detect]\nnoise_floor_dbfs = -50.0\nline_dead_dbfs = -30.0\n", encoding="utf-8"
+    )
+    cfg = config.load(root=tmp_path)
+    assert cfg.detect.line_dead_dbfs == -60.0
+    assert any("line_dead_dbfs" in w for w in cfg.warnings)
+
+
+def test_sensible_thresholds_are_left_alone(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[detect]\nnoise_floor_dbfs = -45.0\nline_dead_dbfs = -58.0\n", encoding="utf-8"
+    )
+    cfg = config.load(root=tmp_path)
+    assert cfg.detect.line_dead_dbfs == -58.0
+    assert cfg.warnings == []
+
+
+def test_the_hangup_fallback_defaults_long_not_short(tmp_path):
+    """A short value here is what splits one call into two."""
+    assert config.load(root=tmp_path).detect.hangup_silence_s >= 30.0
+
+
 def test_min_longer_than_max_would_discard_every_call(tmp_path):
     (tmp_path / "config.toml").write_text(
         "[detect]\nmin_call_s = 100\nmax_call_s = 60\n", encoding="utf-8"
