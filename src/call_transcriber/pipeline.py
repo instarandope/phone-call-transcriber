@@ -38,9 +38,45 @@ class Result:
     warnings: list[str] = field(default_factory=list)
 
 
+CLIP_THRESHOLD = 32700  # int16 full scale is 32767
+CLIP_FRACTION = 0.005  # half a percent of samples pinned is audible damage
+QUIET_PEAK_DBFS = -20.0
+
+
+def level_warnings(audio: np.ndarray) -> list[str]:
+    """Flag recording levels that will quietly ruin the transcript.
+
+    Both failure modes trace back to one physical knob on the adapter, so the
+    messages name it. Clipping is the worse of the two: whisper copes with a
+    quiet recording far better than with a distorted one, because clipping
+    destroys the waveform rather than just shrinking it.
+    """
+    if audio.size == 0:
+        return []
+
+    peak = int(np.abs(audio).max())
+    clipped = float(np.count_nonzero(np.abs(audio) >= CLIP_THRESHOLD)) / audio.size
+
+    if clipped > CLIP_FRACTION:
+        return [
+            f"{clipped:.1%} of this recording is clipped -- the level is too high "
+            f"and the distortion will cost you accuracy. Turn the record level "
+            f"dial on the adapter down."
+        ]
+
+    peak_dbfs = 20 * np.log10(peak / 32768) if peak else -np.inf
+    if peak_dbfs < QUIET_PEAK_DBFS:
+        return [
+            f"This recording peaked at only {peak_dbfs:.0f} dBFS, which is very "
+            f"quiet. Turn the record level dial on the adapter up, aiming for "
+            f"peaks around -12 dBFS."
+        ]
+    return []
+
+
 def process_call(call: Call, cfg, *, ui=None) -> Result:
     """Transcribe, extract, save and surface one finished call."""
-    warnings: list[str] = []
+    warnings: list[str] = level_warnings(call.audio)
     started = time.monotonic()
 
     # The recording is transcribed straight out of memory and, unless

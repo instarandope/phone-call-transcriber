@@ -251,3 +251,76 @@ def test_it_waits_for_enough_evidence_before_complaining(cfg, caplog):
         _run_frames(runner, pipeline.State.IN_CALL, runner.HOT_INPUT_AFTER_FRAMES - 1)
 
     assert "hearing the room" not in caplog.text
+
+
+# -- recording level -------------------------------------------------------
+
+
+def _tone(peak, n=16000):
+    t = np.linspace(0, 1, n, dtype=np.float64)
+    return (np.sin(2 * np.pi * 300 * t) * peak).astype(np.int16).reshape(-1, 1)
+
+
+def test_a_healthy_level_says_nothing():
+    assert pipeline.level_warnings(_tone(12000)) == []
+
+
+def test_clipping_names_the_dial_to_turn_down():
+    clipped = np.full((16000, 1), 32767, dtype=np.int16)
+    warnings = pipeline.level_warnings(clipped)
+
+    assert len(warnings) == 1
+    assert "clipped" in warnings[0]
+    assert "down" in warnings[0]
+
+
+def test_a_few_clipped_samples_are_tolerated():
+    """A brief peak is not distortion worth complaining about."""
+    audio = _tone(12000)
+    audio[:20] = 32767
+    assert pipeline.level_warnings(audio) == []
+
+
+def test_a_very_quiet_recording_names_the_dial_to_turn_up():
+    warnings = pipeline.level_warnings(_tone(1000))
+
+    assert len(warnings) == 1
+    assert "quiet" in warnings[0]
+    assert "up" in warnings[0]
+
+
+def test_clipping_is_reported_rather_than_quietness_when_both_could_apply():
+    """Clipping is the more damaging fault, so it wins."""
+    audio = np.zeros((16000, 1), dtype=np.int16)
+    audio[:1000] = 32767
+    warnings = pipeline.level_warnings(audio)
+
+    assert len(warnings) == 1
+    assert "clipped" in warnings[0]
+
+
+def test_digital_silence_does_not_divide_by_zero():
+    warnings = pipeline.level_warnings(np.zeros((16000, 1), dtype=np.int16))
+    assert "quiet" in warnings[0]
+
+
+def test_an_empty_recording_is_not_complained_about():
+    assert pipeline.level_warnings(np.zeros((0, 1), dtype=np.int16)) == []
+
+
+def test_the_level_warning_reaches_the_popup(cfg, stub_models):
+    quiet = Call(
+        audio=_tone(500, 16000 * 3),
+        sample_rate=16000,
+        started_at=1785500000.0,
+        duration_s=3.0,
+        ended_reason="hangup",
+    )
+    posted = []
+
+    class Ui:
+        def request(self, popup):
+            posted.append(popup)
+
+    pipeline.process_call(quiet, cfg, ui=Ui())
+    assert any("record level dial" in w for w in posted[0].warnings)
