@@ -166,3 +166,75 @@ def test_a_short_recording_survives_if_it_was_not_a_double_tap():
     assert call is not None
     assert call.duration_s < ManualDetector.MIN_S
     assert det.discarded == 0
+
+
+# -- switching from one caller straight to the next ------------------------
+
+
+def test_stop_then_start_between_frames_still_makes_two_recordings():
+    """Ending one call and answering the next waiting on hold.
+
+    Both presses land inside a single 20 ms frame, so a plain flag would show
+    only "recording" and the two callers would end up in one work order.
+    """
+    det = detector()
+    det.toggle()
+    feed(det, 300)
+
+    det.toggle()  # stop caller one
+    det.toggle()  # start caller two -- same frame, no push in between
+
+    first = feed(det, 1)
+    assert first is not None
+    assert first.ended_reason == "manual"
+
+    feed(det, 600)
+    det.toggle()
+    second = feed(det, 1)
+
+    assert second is not None
+    assert second.duration_s > first.duration_s
+    # Caller two's recording must not contain caller one.
+    assert second.duration_s < first.duration_s * 3
+
+
+def test_the_second_recording_starts_clean():
+    det = detector()
+    det.toggle(); feed(det, 500); det.toggle(); feed(det, 1)
+
+    det.toggle()
+    feed(det, 250)
+    det.toggle()
+    second = feed(det, 1)
+
+    assert 4.9 < second.duration_s < 5.2
+
+
+def test_a_burst_of_presses_does_not_lose_the_final_state():
+    det = detector()
+    for _ in range(6):  # even count -- ends up back at "not recording"
+        det.toggle()
+
+    assert det.recording is False
+    feed(det, 400)
+    assert det.state is State.IDLE
+
+
+def test_an_odd_burst_of_presses_leaves_it_recording():
+    det = detector()
+    for _ in range(5):
+        det.toggle()
+
+    assert det.recording is True
+    feed(det, 400)
+    assert det.state is State.IN_CALL
+
+
+def test_presses_queued_while_idle_are_honoured_in_order():
+    det = detector()
+    det.toggle()   # start
+    det.toggle()   # stop, before a single frame has been processed
+
+    assert feed(det, 200) is None      # too short to keep, but it did run
+    assert det.discarded == 1
+    assert det.state is State.IDLE

@@ -255,43 +255,62 @@ class ManualDetector:
         self._max_frames = max(1, round(cfg.max_call_s * 1000 / frame_ms))
         self._recorded: list[np.ndarray] = []
         self._started_at = 0.0
-        # Set from the hotkey thread, read from the capture thread. An Event is
-        # the whole synchronisation story -- there is nothing else shared.
-        self._want = threading.Event()
+
+        # Presses are queued rather than collapsed into a single flag. Frames
+        # arrive every 20 ms, and someone ending one call and starting the next
+        # can easily press stop and start inside one frame. A flag would show
+        # only the final value -- still "recording" -- and the two calls would
+        # silently merge into one recording. The queue guarantees every press
+        # produces its transition, even if it lands a frame or two later.
+        self._lock = threading.Lock()
+        self._pending: collections.deque[bool] = collections.deque()
+        self._recording = False
 
     @property
     def recording(self) -> bool:
-        return self._want.is_set()
+        with self._lock:
+            return self._recording
 
     def toggle(self) -> bool:
         """Flip recording on or off. Returns the new state. Thread-safe."""
-        if self._want.is_set():
-            self._want.clear()
-        else:
-            self._want.set()
-        return self._want.is_set()
+        with self._lock:
+            self._recording = not self._recording
+            self._pending.append(self._recording)
+            return self._recording
+
+    def _next_command(self) -> bool | None:
+        """Take one queued press, so a rapid pair is two recordings not one."""
+        with self._lock:
+            return self._pending.popleft() if self._pending else None
 
     def push(self, frame: np.ndarray) -> Call | None:
-        want = self._want.is_set()
+        command = self._next_command()
 
         if self.state is State.IDLE:
-            if not want:
+            if command is not True:
                 return None
             self._begin()
+            self._recorded.append(_as_int16(frame))
+            return None
 
         self._recorded.append(_as_int16(frame))
 
-        if not want:
+        if command is False:
             return self._finish("manual")
         if len(self._recorded) >= self._max_frames:
-            # Stop asking for more, or the next frame would start a new one.
-            self._want.clear()
+            # Drop any queued presses too: they were aimed at a recording that
+            # no longer exists.
+            with self._lock:
+                self._recording = False
+                self._pending.clear()
             return self._finish("max_length")
         return None
 
     def flush(self) -> Call | None:
+        with self._lock:
+            self._recording = False
+            self._pending.clear()
         if self.state is State.IN_CALL:
-            self._want.clear()
             return self._finish("shutdown")
         return None
 

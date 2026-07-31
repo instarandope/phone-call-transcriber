@@ -67,6 +67,22 @@ without looking, `"pause"` is about the least contested one on the board.
 **`auto`** — the app decides for itself, as described below. Good in a quiet
 office, and nowhere else.
 
+### One call straight after another
+
+If someone is holding on a second line, **press the hotkey twice** when you
+switch: once to end the first caller, once to begin the second. You will hear
+the falling pair then the rising pair.
+
+It cannot work this out for itself. In manual mode the hotkey is the only thing
+that separates recordings, so leaving it running through both conversations
+produces one recording with two customers in it, and one work order with their
+details blended together.
+
+Pressing twice in quick succession is safe — presses are queued rather than
+sampled, so even both landing inside the same fraction of a second still gives
+you two separate recordings. The first call starts transcribing in the
+background while the second one records.
+
 ## How auto mode decides
 
 There is no record button. The adapter is live whenever the handset is off the
