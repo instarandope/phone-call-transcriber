@@ -106,6 +106,16 @@ beep = true
 #   tiny.en  base.en  small.en  medium.en  distil-large-v3
 model = "small.en"
 
+# Words this trade actually uses, fed to whisper before it listens. It picks
+# between similar-sounding words partly on what it expects, so listing your
+# vocabulary is usually more effective than a bigger model -- and free.
+#
+# Put in the terms that get misheard: parts, brands, street names, your own
+# business name. Keep it under a couple of hundred words.
+#
+# vocabulary = "torsion spring, cables, rollers, tracks, panels, opener, keypad, weather seal, drum, bracket, Hanover Door Systems"
+vocabulary = ""
+
 # auto | cpu | cuda
 device = "auto"
 
@@ -152,8 +162,15 @@ save_transcript = true
 
 
 [business]
-# Optional. Printed at the top of the work order.
+# Printed at the top of the work order, and told to the model so it never
+# mistakes your own business for the customer's details.
 name = ""
+
+# Whoever answers the phone, comma-separated. Worth filling in: the transcript
+# does not say who is speaking, so without this the model has no way to tell
+# "my name is Johan" from a customer introducing themselves -- and it will put
+# your own staff member down as the customer.
+staff = ""
 
 # Optional. Helps the model resolve partial addresses like "on Maple, here in
 # town" into something a tech can navigate to. Leave blank to disable.

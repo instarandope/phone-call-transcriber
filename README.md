@@ -426,6 +426,42 @@ require only one party to know; others require everyone on the line to consent.
 Check what applies where you operate, and if you need an announcement at the
 start of the call, make sure it is in place before you rely on this.
 
+## When the work order gets something wrong
+
+Read the work order beside its transcript before blaming the model. The two
+common faults have cheap fixes that a bigger model would not provide.
+
+**Your own staff listed as the customer.** The transcript does not say who is
+speaking, so when someone answers with "my name is Johan", that is the only
+name the model has. Fill in `[business]`:
+
+```toml
+[business]
+name = "Hanover Door Systems"
+staff = "Johan, Jeremy"
+```
+
+Those names are then explicitly excluded from ever being the customer. This is
+not a model-quality problem — a larger model makes exactly the same call,
+because the information genuinely is not in the transcript.
+
+**Trade words coming out wrong** — "cables" heard as "key balls". Whisper
+chooses between similar-sounding words partly on what it expects to hear, so
+tell it:
+
+```toml
+[transcribe]
+vocabulary = "torsion spring, cables, rollers, tracks, panels, opener, keypad, drum, bracket"
+```
+
+Add whatever you see misheard. This costs nothing at runtime and is usually
+more effective than moving up a model size.
+
+**Only then reach for a bigger model.** `small.en` → `medium.en` roughly
+triples transcription time; check `processing_s` in `extracted.json` before and
+after and decide whether the accuracy is worth it. Same for `gemma3:4b` →
+`gemma3:12b`, which needs about 10 GB of RAM.
+
 ## Configuration worth knowing about
 
 Full documentation is in the comments of

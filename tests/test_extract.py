@@ -220,3 +220,74 @@ def test_a_slow_model_is_not_retried(monkeypatch, no_waiting):
         extract._post("http://x/api/chat", {}, _Cfg())
 
     assert calls["n"] == 1
+
+
+# -- the work order must not contradict itself -----------------------------
+
+
+def test_a_field_that_was_captured_is_not_also_still_needed():
+    """The reported bug: ADDRESS filled in, and listed under STILL NEEDED."""
+    data = extract.empty_result()
+    data["service_address"] = "19 West Grove Bay, Mitchell, Manitoba"
+    data["callback_number"] = "204 962 2241"
+    data["missing_info"] = ["service_address", "callback_number", "caller_name"]
+
+    out = extract._reconcile(data)
+
+    assert out["missing_info"] == ["CUSTOMER"]
+
+
+def test_field_names_become_the_labels_that_are_printed():
+    data = extract.empty_result()
+    data["missing_info"] = ["callback_number", "service_address"]
+
+    assert extract._reconcile(data)["missing_info"] == ["PHONE", "ADDRESS"]
+
+
+def test_labels_the_model_already_got_right_are_left_alone():
+    data = extract.empty_result()
+    data["missing_info"] = ["PHONE", "ADDRESS"]
+
+    assert extract._reconcile(data)["missing_info"] == ["PHONE", "ADDRESS"]
+
+
+def test_a_field_named_by_its_label_is_still_dropped_when_captured():
+    data = extract.empty_result()
+    data["callback_number"] = "204 962 2241"
+    data["missing_info"] = ["PHONE"]
+
+    assert extract._reconcile(data)["missing_info"] == []
+
+
+def test_an_unknown_enum_still_counts_as_missing():
+    data = extract.empty_result()
+    data["missing_info"] = ["urgency"]
+
+    assert extract._reconcile(data)["missing_info"] == ["URGENCY"]
+
+
+def test_free_text_the_model_invented_survives():
+    data = extract.empty_result()
+    data["missing_info"] = ["Whether the opener is under warranty"]
+
+    assert extract._reconcile(data)["missing_info"] == [
+        "Whether the opener is under warranty"
+    ]
+
+
+def test_duplicates_are_collapsed():
+    data = extract.empty_result()
+    data["missing_info"] = ["caller_name", "CUSTOMER", "caller name"]
+
+    assert extract._reconcile(data)["missing_info"] == ["CUSTOMER"]
+
+
+def test_staff_names_are_given_to_the_model():
+    class Business:
+        name = "Hanover Door Systems"
+        staff = "Johan, Jeremy"
+        default_service_area = ""
+
+    prompt = extract._user_prompt("hello", Business(), None)
+    assert "NEVER the customer" in prompt
+    assert "Johan, Jeremy" in prompt

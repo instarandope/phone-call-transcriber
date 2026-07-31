@@ -43,6 +43,9 @@ class DetectConfig:
 @dataclass
 class TranscribeConfig:
     model: str = "small.en"
+    # Trade vocabulary, fed to whisper so it expects these words. Far more
+    # effective on domain terms than moving to a larger model.
+    vocabulary: str = ""
     device: str = "auto"
     compute_type: str = "int8"
     beam_size: int = 1
@@ -81,6 +84,10 @@ class OutputConfig:
 @dataclass
 class BusinessConfig:
     name: str = ""
+    # Comma-separated names of whoever answers the phone. Without this, an
+    # unlabelled transcript gives the model no way to tell the person saying
+    # "my name is X" from the customer, and it will take whichever name it saw.
+    staff: str = ""
     default_service_area: str = ""
 
 

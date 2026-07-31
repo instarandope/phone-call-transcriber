@@ -39,7 +39,12 @@ point of being a guess, treat it as not stated and add it to missing_info \
 rather than writing down something that might be wrong.
 4. Keep numbers, addresses, model numbers and prices exactly as spoken. Do not \
 normalise, reformat, or "fix" them.
-5. Reply with JSON matching the schema. No commentary.
+5. The transcript usually does not say who is speaking. The person who answers \
+by naming the business, and anyone introduced as working there, are STAFF -- \
+never the customer. The customer is the other party: the one describing a \
+problem, giving an address to visit, and being asked for their details. If the \
+staff member says "my name is X", X is not the customer's name.
+6. Reply with JSON matching the schema. No commentary.
 """
 
 SPEAKER_NOTE = """\
@@ -96,13 +101,50 @@ def extract(transcript_text: str, cfg, business=None) -> dict:
 
     chunks = _chunk(text, cfg.chunk_chars)
     if len(chunks) == 1:
-        return _extract_one(chunks[0], cfg, business, part=None)
+        return _reconcile(_extract_one(chunks[0], cfg, business, part=None))
 
     log.info("transcript is %d chars; extracting in %d parts", len(text), len(chunks))
     results = []
     for index, chunk in enumerate(chunks, start=1):
         results.append(_extract_one(chunk, cfg, business, part=(index, len(chunks))))
-    return _merge(results)
+    return _reconcile(_merge(results))
+
+
+def _reconcile(data: dict) -> dict:
+    """Stop the work order contradicting itself.
+
+    Models list a field under missing_info and then fill it in anyway, which
+    produces a work order showing an address and, below it, "STILL NEEDED:
+    service_address". Whether a value is present is a fact we hold, not
+    something to be asked about -- so it is settled here rather than in the
+    prompt. Field names are also mapped to their printed labels, since
+    "callback_number" means nothing to whoever picks the job up.
+    """
+    captured: set[str] = set()
+    for f in fields.FIELDS:
+        if f.kind == "list":
+            continue
+        value = data.get(f.name)
+        if value in (None, "", "unknown"):
+            continue
+        captured.add(f.name)
+        captured.add(f.label.lower())
+
+    cleaned: list[str] = []
+    for item in data.get("missing_info") or []:
+        raw = str(item).strip()
+        if not raw:
+            continue
+        key = raw.lower().replace(" ", "_").replace("-", "_")
+        if key in captured or raw.lower() in captured:
+            continue
+        field = fields.BY_NAME.get(key)
+        label = field.label if field else raw
+        if label not in cleaned:
+            cleaned.append(label)
+
+    data["missing_info"] = cleaned
+    return data
 
 
 # -- one round trip --------------------------------------------------------
@@ -203,8 +245,14 @@ def _user_prompt(text: str, business, part: tuple[int, int] | None) -> str:
         blocks.append(SPEAKER_NOTE)
     if business is not None and business.name:
         blocks.append(
-            f"The business receiving the call is {business.name}. Its own name, "
-            f"staff and address are never the customer's details."
+            f"The business receiving the call is {business.name}. This call came "
+            f"IN to them. Their own name, staff, equipment and address are never "
+            f"the customer's details."
+        )
+    if business is not None and getattr(business, "staff", ""):
+        blocks.append(
+            f"These people answer the phone for the business and are NEVER the "
+            f"customer, however they introduce themselves: {business.staff}."
         )
     if business is not None and business.default_service_area:
         blocks.append(

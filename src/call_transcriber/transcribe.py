@@ -150,11 +150,27 @@ def _transcribe_split(model, audio: np.ndarray, cfg) -> list[Segment]:
     return merged
 
 
+def _initial_prompt(cfg) -> str | None:
+    """Prime whisper with the vocabulary of this trade.
+
+    Whisper picks between similar-sounding words partly on how likely each is
+    in context. Seeing the trade's terms first shifts that: "cables" stops
+    losing to "key balls" because cables are now expected and key balls are
+    not. Cheaper and more targeted than a larger model, which would still have
+    no idea what business this is.
+    """
+    vocabulary = (getattr(cfg, "vocabulary", "") or "").strip()
+    if not vocabulary:
+        return None
+    return f"The following conversation may mention: {vocabulary}."
+
+
 def _run(model, samples: np.ndarray, cfg) -> list[Segment]:
     segments, _info = model.transcribe(
         samples,
         language=cfg.language or None,
         beam_size=cfg.beam_size,
+        initial_prompt=_initial_prompt(cfg),
         # Whisper hallucinates fluent-sounding text over silence; its own VAD
         # filter is the cheapest defence, and phone calls have a lot of silence.
         vad_filter=True,
