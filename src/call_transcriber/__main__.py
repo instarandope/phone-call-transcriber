@@ -52,7 +52,12 @@ def _parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command")
     run = sub.add_parser("run", help="listen for calls (default)")
-    run.add_argument("--tray", action="store_true", help="show a system tray icon")
+    run.add_argument(
+        "--tray",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="system tray icon (on by default; --no-tray to suppress)",
+    )
     sub.add_parser("devices", help="list audio input devices")
     sub.add_parser("doctor", help="check the setup")
     levels = sub.add_parser("levels", help="measure your line and suggest thresholds")
@@ -69,7 +74,7 @@ def _parser() -> argparse.ArgumentParser:
         help="delete work orders and transcripts too, not just audio",
     )
 
-    parser.set_defaults(command="run", tray=False)
+    parser.set_defaults(command="run", tray=True)
     return parser
 
 

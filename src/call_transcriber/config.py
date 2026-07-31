@@ -61,9 +61,10 @@ class ExtractConfig:
 
 @dataclass
 class ControlConfig:
+    # manual -- nothing is recorded until the hotkey is pressed. The default,
+    #           because recording without being asked is the worse mistake.
     # auto   -- the app decides when a call starts and stops
-    # manual -- nothing is recorded until the hotkey is pressed
-    mode: str = "auto"
+    mode: str = "manual"
     hotkey: str = "ctrl+alt+r"
     beep: bool = True
 

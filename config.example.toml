@@ -81,11 +81,18 @@ max_call_s = 3600.0
 #   manual -- nothing is recorded until you press the hotkey, and it keeps
 #             recording until you press it again. Use this in a workshop, a
 #             shop floor, or any room where background noise would otherwise
-#             start recordings that were never calls.
-mode = "auto"
+#             start recordings that were never calls. This is the default:
+#             nothing is captured until you ask for it.
+mode = "manual"
 
 # Works from any window, so you never have to leave what you are doing.
-# Write it the obvious way: "ctrl+alt+r", "ctrl+shift+space", "f9".
+# Write it the obvious way: "ctrl+alt+r", "ctrl+shift+space", "f9", "pause".
+#
+# Fn is NOT available. The Fn key is handled inside the keyboard's own
+# firmware and never reaches Windows, so no program can bind it.
+#
+# "pause" -- the Pause/Break key -- is worth considering if you want one key
+# you can hit without looking. Almost nothing else claims it.
 hotkey = "ctrl+alt+r"
 
 # Two rising tones when recording starts, two falling when it stops -- so you

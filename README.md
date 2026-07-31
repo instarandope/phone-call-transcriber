@@ -48,17 +48,24 @@ anywhere — there is no account, no API key and no cloud service involved.
 
 Set `mode` under `[control]` in `config.toml`.
 
-**`manual`** — a global hotkey (default **Ctrl+Alt+R**) starts recording, and
-pressing it again stops. Two rising beeps confirm the start, two falling ones
-the stop, so you never have to look at the screen. Nothing is recorded until
-you say so.
+**`manual`** (the default) — a global hotkey, **Ctrl+Alt+R** out of the box,
+starts recording; pressing it again stops. Two rising beeps confirm the start,
+two falling ones the stop, so you never have to look at the screen. **Nothing
+is recorded until you ask for it**, including at launch.
 
-Use this in a workshop, a shop floor, or any room where people talk near the
-phone. Automatic detection assumes the loudest thing near the adapter is the
-phone; in a noisy room that is false, and you get work orders generated from
-conversations that were never calls.
+This is the default because recording something nobody asked to record is the
+worse mistake. It is also the only workable option in a workshop, a shop floor,
+or any room where people talk near the phone: automatic detection assumes the
+loudest thing near the adapter is the phone, and in a noisy room that is simply
+false.
 
-**`auto`** — the app decides, as described below. Good in a quiet office.
+Any combination works — `"f9"`, `"ctrl+shift+space"`, `"pause"`. **`Fn` cannot
+be used**: it is handled inside the keyboard's firmware and never reaches
+Windows, so no program can bind it. If you want a single key you can hit
+without looking, `"pause"` is about the least contested one on the board.
+
+**`auto`** — the app decides for itself, as described below. Good in a quiet
+office, and nowhere else.
 
 ## How auto mode decides
 

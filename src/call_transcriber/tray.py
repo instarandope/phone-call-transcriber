@@ -15,8 +15,11 @@ import threading
 
 log = logging.getLogger(__name__)
 
-IDLE_COLOR = (90, 100, 115)
-RECORDING_COLOR = (200, 40, 40)
+# The tray renders these at 16x16, so the two states have to differ in shape
+# as well as colour -- a small disc changing hue is not readable at that size.
+# Idle is a hollow ring, recording is a solid red disc.
+IDLE_COLOR = (110, 120, 135, 255)
+RECORDING_COLOR = (220, 38, 38, 255)
 
 
 def start(runner, cfg) -> threading.Thread | None:
@@ -41,10 +44,14 @@ def _run(runner, cfg) -> None:
         from . import storage
         from .vad import State
 
-        def icon_image(color):
-            image = Image.new("RGB", (64, 64), (245, 245, 245))
+        def icon_image(recording):
+            # Transparent, so it sits correctly on a light or dark taskbar.
+            image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
             draw = ImageDraw.Draw(image)
-            draw.ellipse((10, 10, 54, 54), fill=color)
+            if recording:
+                draw.ellipse((4, 4, 60, 60), fill=RECORDING_COLOR)
+            else:
+                draw.ellipse((6, 6, 58, 58), outline=IDLE_COLOR, width=9)
             return image
 
         def status_text(_item):
@@ -73,7 +80,7 @@ def _run(runner, cfg) -> None:
 
         icon = pystray.Icon(
             "call_transcriber",
-            icon_image(IDLE_COLOR),
+            icon_image(False),
             "Call Transcriber",
             menu=pystray.Menu(
                 pystray.MenuItem(status_text, None, enabled=False),
@@ -98,16 +105,24 @@ def _run(runner, cfg) -> None:
         )
 
         def watch():
-            """Recolour the icon so a glance tells you if it's recording."""
+            """Redraw the icon so a glance tells you whether it is recording."""
             last = None
-            while not runner.stop_event.wait(0.5):
-                current = runner.state is State.IN_CALL and not runner.paused.is_set()
-                if current != last:
-                    try:
-                        icon.icon = icon_image(RECORDING_COLOR if current else IDLE_COLOR)
-                    except Exception:
-                        pass
-                    last = current
+            while not runner.stop_event.wait(0.3):
+                current = runner.state is State.IN_CALL
+                if current == last:
+                    continue
+                try:
+                    icon.icon = icon_image(current)
+                    icon.title = (
+                        "Call Transcriber - RECORDING" if current else "Call Transcriber"
+                    )
+                    icon.update_menu()
+                except Exception as exc:
+                    # The icon may not be on screen yet. Leave `last` alone so
+                    # the next tick tries again rather than giving up silently.
+                    log.debug("could not update the tray icon: %s", exc)
+                    continue
+                last = current
             try:
                 icon.stop()
             except Exception:
