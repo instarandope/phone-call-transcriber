@@ -299,15 +299,15 @@ def test_duplicates_are_collapsed():
     assert extract._reconcile(data)["missing_info"] == ["CUSTOMER"]
 
 
-def test_staff_names_are_given_to_the_model():
+def test_staff_names_reach_the_model():
     class Business:
         name = "Hanover Door Systems"
         staff = "Johan, Jeremy"
         default_service_area = ""
 
     prompt = extract._user_prompt("hello", Business(), None)
-    assert "NEVER the customer" in prompt
     assert "Johan, Jeremy" in prompt
+    assert "staff, not the customer" in prompt
 
 
 # -- reasoning models ------------------------------------------------------
@@ -372,3 +372,36 @@ def test_an_essential_field_is_not_listed_twice():
 def test_non_essential_gaps_are_still_left_to_the_model():
     """Not every blank matters -- an empty PRICING is usually just no quote."""
     assert "PRICING" not in extract._reconcile(with_essentials())["missing_info"]
+
+
+# -- who is staff ----------------------------------------------------------
+
+
+class _Business:
+    name = "Hanover Door Systems"
+    staff = "Johan, Derek"
+    default_service_area = ""
+
+
+def test_staff_are_named_to_the_model():
+    prompt = extract._user_prompt("hello", _Business(), None)
+    assert "Johan, Derek" in prompt
+
+
+def test_a_caller_sharing_a_staff_name_is_still_the_customer():
+    """Otherwise a customer called Johan would be silently dropped."""
+    prompt = extract._user_prompt("hello", _Business(), None)
+    assert "still the customer" in prompt
+    assert "not by the name alone" in prompt
+
+
+def test_someone_not_listed_is_not_ruled_out_as_staff():
+    """A new hire answering the phone must not become the customer."""
+    prompt = extract._user_prompt("hello", _Business(), None)
+    assert "may be either side" in prompt
+
+
+def test_the_standing_rule_covers_staff_nobody_listed():
+    """Whoever answers by naming the business is staff, listed or not."""
+    assert "naming the business" in extract.SYSTEM_PROMPT
+    assert "STAFF" in extract.SYSTEM_PROMPT

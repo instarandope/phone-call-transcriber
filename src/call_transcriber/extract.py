@@ -295,8 +295,14 @@ def _user_prompt(text: str, business, part: tuple[int, int] | None) -> str:
         )
     if business is not None and getattr(business, "staff", ""):
         blocks.append(
-            f"These people answer the phone for the business and are NEVER the "
-            f"customer, however they introduce themselves: {business.staff}."
+            f"These people answer the phone for the business: {business.staff}. "
+            f"When one of them is the one speaking for the business, they are "
+            f"staff, not the customer -- so a line like \"my name is X\" from the "
+            f"side that answered is not the customer's name. This is a hint about "
+            f"who is likely on which side, not a rule about the name itself: if "
+            f"the person CALLING happens to share a name with one of them, they "
+            f"are still the customer. Judge by what each side says and does, not "
+            f"by the name alone. Anyone not on this list may be either side."
         )
     if business is not None and business.default_service_area:
         blocks.append(

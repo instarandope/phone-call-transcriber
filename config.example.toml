@@ -184,6 +184,13 @@ name = ""
 # does not say who is speaking, so without this the model has no way to tell
 # "my name is Johan" from a customer introducing themselves -- and it will put
 # your own staff member down as the customer.
+#
+# This is a hint, not a lock. Someone not listed who answers by naming the
+# business is still recognised as staff, and a CALLER who happens to share a
+# name with someone listed is still recorded as the customer. Listing everyone
+# who answers just makes it certain rather than inferred.
+#
+# staff = "Johan, Derek"
 staff = ""
 
 # Optional. Helps the model resolve partial addresses like "on Maple, here in
