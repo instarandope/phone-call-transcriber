@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "test":
         return _cmd_test(cfg, Path(args.file))
     if args.command == "compare":
-        return _cmd_compare(cfg, Path(args.file), args.models)
+        return _cmd_compare(cfg, Path(args.file) if args.file else None, args.models)
     if args.command == "purge":
         return _cmd_purge(cfg, args.purge_all)
     return _cmd_run(cfg, use_tray=args.tray)
@@ -74,7 +74,11 @@ def _parser() -> argparse.ArgumentParser:
     compare = sub.add_parser(
         "compare", help="run one recording through several extraction models"
     )
-    compare.add_argument("file", help="path to a .wav/.mp3/.m4a recording")
+    compare.add_argument(
+        "file",
+        nargs="?",
+        help="recording to use; defaults to the most recent kept call",
+    )
     compare.add_argument(
         "--models",
         required=True,
@@ -465,7 +469,15 @@ def _bar(level: float, width: int = 40) -> str:
     return "[" + "#" * filled + "-" * (width - filled) + "]"
 
 
-def _cmd_compare(cfg, path: Path, models: str) -> int:
+def _latest_recording(cfg) -> Path | None:
+    """The most recently kept call, so comparing needs no path typed out."""
+    kept = list(cfg.output_dir.rglob("call.wav"))
+    if not kept:
+        return None
+    return max(kept, key=lambda p: p.stat().st_mtime)
+
+
+def _cmd_compare(cfg, path: Path | None, models: str) -> int:
     """Run one recording through several extraction models.
 
     Which model to use is an empirical question about a specific machine and a
@@ -477,6 +489,18 @@ def _cmd_compare(cfg, path: Path, models: str) -> int:
     import time as _time
 
     from . import extract, storage, transcribe, workorder
+
+    if path is None:
+        path = _latest_recording(cfg)
+        if path is None:
+            print(
+                "No saved recordings to compare against.\n\n"
+                "  Comparing models needs one call to run through all of them. Set\n"
+                "  keep_audio = true under [output] in config.toml, take a call, then\n"
+                "  run this again. Turn keep_audio back off afterwards."
+            )
+            return 1
+        print(f"Using the most recent kept call: {path}\n")
 
     if not path.exists():
         print(f"error: {path} does not exist")
