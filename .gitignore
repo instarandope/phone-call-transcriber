@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# Call data. Nothing recorded, transcribed, or extracted may ever be committed.
+# ---------------------------------------------------------------------------
+output/
+recordings/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+transcript*.txt
+work_order*.txt
+extracted*.json
+
+# Local configuration (may contain business details / paths)
+config.toml
+.env
+
+# Models
+models/
+*.bin
+*.gguf
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

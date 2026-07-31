@@ -1,0 +1,182 @@
+"""Configuration loading.
+
+Every field has a default that works on a stock Windows box, so a missing or
+partial config.toml is never fatal -- unknown keys are reported rather than
+silently ignored, because a typo'd setting that quietly does nothing is worse
+than one that complains.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass
+class AudioConfig:
+    device_match: str = "LRX"
+    sample_rate: int = 16000
+    stereo_mode: str = "auto"  # auto | mixed | split
+
+
+@dataclass
+class DetectConfig:
+    vad_aggressiveness: int = 2
+    speech_trigger_ms: int = 300
+    hangup_silence_s: float = 6.0
+    min_call_s: float = 10.0
+    max_call_s: float = 3600.0
+    noise_floor_dbfs: float = -50.0
+
+
+@dataclass
+class TranscribeConfig:
+    model: str = "small.en"
+    device: str = "auto"
+    compute_type: str = "int8"
+    beam_size: int = 1
+    language: str = "en"
+
+
+@dataclass
+class ExtractConfig:
+    base_url: str = "http://127.0.0.1:11434"
+    model: str = "gemma3:4b"
+    temperature: float = 0.0
+    num_ctx: int = 8192
+    chunk_chars: int = 12000
+    timeout_s: int = 180
+
+
+@dataclass
+class OutputConfig:
+    dir: str = "output"
+    keep_audio: bool = False
+    show_popup: bool = True
+    copy_to_clipboard: bool = True
+    save_transcript: bool = True
+
+
+@dataclass
+class BusinessConfig:
+    name: str = ""
+    default_service_area: str = ""
+
+
+@dataclass
+class Config:
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    detect: DetectConfig = field(default_factory=DetectConfig)
+    transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
+    extract: ExtractConfig = field(default_factory=ExtractConfig)
+    output: OutputConfig = field(default_factory=OutputConfig)
+    business: BusinessConfig = field(default_factory=BusinessConfig)
+
+    root: Path = field(default_factory=Path.cwd)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def output_dir(self) -> Path:
+        d = Path(self.output.dir)
+        return d if d.is_absolute() else self.root / d
+
+
+def _build(cls, table: dict, prefix: str, warnings: list[str]):
+    """Instantiate a config dataclass from a TOML table, coercing scalars."""
+    known = {f.name: f for f in dataclasses.fields(cls)}
+    kwargs = {}
+    for key, value in table.items():
+        spec = known.get(key)
+        if spec is None:
+            warnings.append(f"unknown setting [{prefix}] {key!r} -- ignored")
+            continue
+        # `from __future__ import annotations` means field types arrive as
+        # strings, so match on the name rather than the type object.
+        declared = spec.type if isinstance(spec.type, str) else spec.type.__name__
+        try:
+            # bool before int: bool is a subclass of int and would coerce to 1/0.
+            if declared == "bool":
+                kwargs[key] = bool(value)
+            elif declared == "int":
+                kwargs[key] = int(value)
+            elif declared == "float":
+                kwargs[key] = float(value)
+            else:
+                kwargs[key] = str(value)
+        except (TypeError, ValueError):
+            warnings.append(
+                f"[{prefix}] {key} = {value!r} is not a valid {declared} -- using default"
+            )
+    return cls(**kwargs)
+
+
+def load(path: Path | None = None, root: Path | None = None) -> Config:
+    """Load config.toml, falling back to defaults for anything absent."""
+    root = root or Path.cwd()
+    path = path or root / "config.toml"
+
+    warnings: list[str] = []
+    data: dict = {}
+    if path.exists():
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            warnings.append(f"{path.name} is not valid TOML ({exc}) -- using defaults")
+        except OSError as exc:
+            warnings.append(f"could not read {path} ({exc}) -- using defaults")
+
+    sections = {
+        "audio": AudioConfig,
+        "detect": DetectConfig,
+        "transcribe": TranscribeConfig,
+        "extract": ExtractConfig,
+        "output": OutputConfig,
+        "business": BusinessConfig,
+    }
+    for name in data:
+        if name not in sections:
+            warnings.append(f"unknown config section [{name}] -- ignored")
+
+    cfg = Config(
+        **{
+            name: _build(cls, data.get(name, {}), name, warnings)
+            for name, cls in sections.items()
+        },
+        root=root,
+        warnings=warnings,
+    )
+    return _validate(cfg)
+
+
+def _validate(cfg: Config) -> Config:
+    """Clamp values that would crash a downstream library if passed through."""
+    if not 0 <= cfg.detect.vad_aggressiveness <= 3:
+        cfg.warnings.append(
+            f"detect.vad_aggressiveness must be 0-3, got "
+            f"{cfg.detect.vad_aggressiveness} -- clamped"
+        )
+        cfg.detect.vad_aggressiveness = min(3, max(0, cfg.detect.vad_aggressiveness))
+
+    # webrtcvad only accepts these rates, and 16 kHz is what whisper wants too.
+    if cfg.audio.sample_rate not in (8000, 16000, 32000, 48000):
+        cfg.warnings.append(
+            f"audio.sample_rate {cfg.audio.sample_rate} is not supported -- using 16000"
+        )
+        cfg.audio.sample_rate = 16000
+
+    if cfg.audio.stereo_mode not in ("auto", "mixed", "split"):
+        cfg.warnings.append(
+            f"audio.stereo_mode {cfg.audio.stereo_mode!r} is not valid -- using 'auto'"
+        )
+        cfg.audio.stereo_mode = "auto"
+
+    if cfg.detect.min_call_s > cfg.detect.max_call_s:
+        cfg.warnings.append(
+            "detect.min_call_s is greater than max_call_s -- every call would be "
+            "discarded, so min_call_s has been reset to 0"
+        )
+        cfg.detect.min_call_s = 0.0
+
+    return cfg

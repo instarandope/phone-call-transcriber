@@ -1,0 +1,285 @@
+"""Turning a raw transcript into work-order fields with a local LLM.
+
+Talks to Ollama on localhost, so the transcript never leaves the machine
+either. Ollama's structured-output mode constrains decoding to the schema in
+fields.py, which means the reply is always parseable JSON with every key
+present -- no regex salvage, no retry loop for malformed output.
+
+The prompt is deliberately hostile to invention. A work order with a blank
+address is annoying; one with a confidently wrong address sends a tech to the
+wrong house.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+
+import requests
+
+from . import fields
+
+log = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = """\
+You extract service work-order details from a transcript of a phone call to a \
+service business.
+
+Rules, in order of importance:
+1. Use ONLY what is actually said in the transcript. Never infer, complete, or \
+invent a value. If a detail was not stated, the value is null (or an empty \
+array for list fields).
+2. Do not repeat the caller's phrasing when it carries no information. Strip \
+greetings, apologies, hold music chatter, thanks, small talk about weather, \
+and anything the transcript repeats. A dispatcher should be able to read the \
+result in five seconds.
+3. Transcripts are imperfect. If a name, street or number is garbled to the \
+point of being a guess, treat it as not stated and add it to missing_info \
+rather than writing down something that might be wrong.
+4. Keep numbers, addresses, model numbers and prices exactly as spoken. Do not \
+normalise, reformat, or "fix" them.
+5. Reply with JSON matching the schema. No commentary.
+"""
+
+SPEAKER_NOTE = """\
+This transcript is labelled SIDE A and SIDE B because the recorder captured \
+each side of the line separately, but it does not know which is which. Work \
+out from the content which side is the caller (the customer) and which is the \
+business answering. Extract details about the CALLER only -- if the person \
+answering states their own name or the business address, that is not the \
+customer's name or the service address.
+"""
+
+
+class ExtractionError(RuntimeError):
+    """Raised when the local model cannot be reached or fails outright."""
+
+
+def empty_result() -> dict:
+    """A blank result, so a failed extraction still produces a usable file."""
+    return fields.empty()
+
+
+def check_server(cfg) -> tuple[bool, str]:
+    """Is Ollama up and does it have the configured model? Used by `doctor`."""
+    try:
+        resp = requests.get(f"{cfg.base_url}/api/tags", timeout=5)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        return False, (
+            f"cannot reach Ollama at {cfg.base_url} ({exc}). "
+            "Install it from https://ollama.com/download and make sure it is running."
+        )
+
+    try:
+        installed = [m.get("name", "") for m in resp.json().get("models", [])]
+    except ValueError:
+        return False, f"Ollama at {cfg.base_url} returned a response that wasn't JSON"
+
+    # Ollama reports "gemma3:4b"; a config of "gemma3" should still match.
+    wanted = cfg.model
+    if any(name == wanted or name.split(":")[0] == wanted.split(":")[0] for name in installed):
+        return True, f"Ollama is running with {wanted}"
+    return False, (
+        f"Ollama is running but {wanted!r} is not installed. "
+        f"Run:  ollama pull {wanted}\n"
+        f"  Models present: {', '.join(installed) if installed else '(none)'}"
+    )
+
+
+def extract(transcript_text: str, cfg, business=None) -> dict:
+    """Extract work-order fields. Long transcripts are chunked and merged."""
+    text = (transcript_text or "").strip()
+    if not text:
+        return fields.empty()
+
+    chunks = _chunk(text, cfg.chunk_chars)
+    if len(chunks) == 1:
+        return _extract_one(chunks[0], cfg, business, part=None)
+
+    log.info("transcript is %d chars; extracting in %d parts", len(text), len(chunks))
+    results = []
+    for index, chunk in enumerate(chunks, start=1):
+        results.append(_extract_one(chunk, cfg, business, part=(index, len(chunks))))
+    return _merge(results)
+
+
+# -- one round trip --------------------------------------------------------
+
+
+def _extract_one(text: str, cfg, business, part: tuple[int, int] | None) -> dict:
+    user = _user_prompt(text, business, part)
+    payload = {
+        "model": cfg.model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        "format": fields.json_schema(),
+        "stream": False,
+        "options": {
+            "temperature": cfg.temperature,
+            "num_ctx": cfg.num_ctx,
+        },
+    }
+
+    try:
+        resp = requests.post(
+            f"{cfg.base_url}/api/chat", json=payload, timeout=cfg.timeout_s
+        )
+    except requests.Timeout as exc:
+        raise ExtractionError(
+            f"the local model took longer than {cfg.timeout_s}s. Try a smaller "
+            f"model in [extract] (gemma3:1b) or raise extract.timeout_s."
+        ) from exc
+    except requests.RequestException as exc:
+        raise ExtractionError(
+            f"cannot reach Ollama at {cfg.base_url} ({exc}). Is it running?"
+        ) from exc
+
+    if resp.status_code == 404:
+        raise ExtractionError(
+            f"Ollama does not have the model {cfg.model!r}. Run:  ollama pull {cfg.model}"
+        )
+    if not resp.ok:
+        raise ExtractionError(f"Ollama returned HTTP {resp.status_code}: {resp.text[:400]}")
+
+    try:
+        content = resp.json()["message"]["content"]
+    except (ValueError, KeyError) as exc:
+        raise ExtractionError(f"unexpected reply from Ollama: {resp.text[:400]}") from exc
+
+    try:
+        raw = json.loads(content)
+    except ValueError as exc:
+        # Structured output should make this impossible, but an older Ollama
+        # that ignores `format` would land here.
+        raise ExtractionError(
+            f"the model did not return JSON. Update Ollama (0.5+ is required for "
+            f"structured output). Reply began: {content[:200]!r}"
+        ) from exc
+
+    return _coerce(raw)
+
+
+def _user_prompt(text: str, business, part: tuple[int, int] | None) -> str:
+    blocks = []
+    if part:
+        index, total = part
+        blocks.append(
+            f"This is part {index} of {total} of one long call. Extract only what "
+            f"appears in this part; leave anything else null."
+        )
+    if "SIDE A" in text or "SIDE B" in text:
+        blocks.append(SPEAKER_NOTE)
+    if business is not None and business.name:
+        blocks.append(
+            f"The business receiving the call is {business.name}. Its own name, "
+            f"staff and address are never the customer's details."
+        )
+    if business is not None and business.default_service_area:
+        blocks.append(
+            f"The business serves {business.default_service_area}. If the caller "
+            f"gives a street with no city, you may record the street as stated -- "
+            f"still do not invent a city, state or ZIP they did not say."
+        )
+    blocks.append("Extract these fields:\n" + fields.instructions())
+    blocks.append("TRANSCRIPT:\n" + text)
+    return "\n\n".join(blocks)
+
+
+# -- long calls ------------------------------------------------------------
+
+
+def _chunk(text: str, limit: int) -> list[str]:
+    """Split on line boundaries so a chunk never cuts a sentence in half."""
+    if limit <= 0 or len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in text.splitlines():
+        # A single line longer than the limit is rare but must not loop forever.
+        if len(line) > limit:
+            if current:
+                chunks.append("\n".join(current))
+                current, size = [], 0
+            for i in range(0, len(line), limit):
+                chunks.append(line[i : i + limit])
+            continue
+        if size + len(line) + 1 > limit and current:
+            chunks.append("\n".join(current))
+            current, size = [], 0
+        current.append(line)
+        size += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or [text]
+
+
+def _merge(results: list[dict]) -> dict:
+    """Combine per-chunk extractions.
+
+    First real answer wins for scalars, because callers state their name and
+    address once, near the start. Lists are unioned -- follow-ups accumulate
+    across the whole call.
+    """
+    merged = fields.empty()
+    for result in results:
+        for f in fields.FIELDS:
+            value = result.get(f.name)
+            if f.kind == "list":
+                existing = merged[f.name]
+                for item in value or []:
+                    if item and item not in existing:
+                        existing.append(item)
+            elif f.kind == "enum":
+                if merged[f.name] in (None, "unknown") and value not in (None, "unknown"):
+                    merged[f.name] = value
+            elif merged[f.name] in (None, "") and value:
+                merged[f.name] = value
+    return merged
+
+
+def _coerce(raw: dict) -> dict:
+    """Normalise whatever came back into exactly the expected shape."""
+    out = fields.empty()
+    if not isinstance(raw, dict):
+        return out
+
+    for f in fields.FIELDS:
+        value = raw.get(f.name)
+        if f.kind == "list":
+            if isinstance(value, str):
+                value = [value]
+            if isinstance(value, list):
+                out[f.name] = [str(v).strip() for v in value if str(v).strip()]
+        elif f.kind == "enum":
+            if isinstance(value, str) and value in f.choices:
+                out[f.name] = value
+        else:
+            if value is None:
+                continue
+            text = str(value).strip()
+            # Models like to write "N/A" or "not stated" instead of null.
+            if text and text.lower() not in _NULLISH:
+                out[f.name] = text
+    return out
+
+
+_NULLISH = {
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "unknown",
+    "not stated",
+    "not provided",
+    "not mentioned",
+    "not specified",
+    "not given",
+    "unspecified",
+    "-",
+    "--",
+}

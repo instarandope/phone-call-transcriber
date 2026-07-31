@@ -1,0 +1,102 @@
+# Copy this file to config.toml and edit. config.toml is gitignored.
+# Every setting below has a working default -- you only need to override
+# what is wrong for your machine.
+
+[audio]
+# Substring matched (case-insensitive) against input device names to find the
+# LRX-40USB. Run `run.bat devices` to see what your adapter reports itself as.
+# Common strings: "LRX", "USB Audio", "USB PnP".
+device_match = "LRX"
+
+# Leave these alone unless `run.bat doctor` tells you to change them.
+sample_rate = 16000
+
+# How the adapter presents the two sides of the call.
+#   auto   -- measure it on the first call and decide (recommended)
+#   mixed  -- both sides summed into one signal
+#   split  -- your voice on one channel, the caller on the other
+stereo_mode = "auto"
+
+
+[detect]
+# webrtcvad aggressiveness, 0-3. Higher = more willing to call something
+# non-speech. 2 is a good default for telephone-band audio.
+vad_aggressiveness = 2
+
+# Continuous speech required before we decide a call has started.
+speech_trigger_ms = 300
+
+# Silence required before we decide the call has ended and start processing.
+# Raise this if long pauses are cutting your calls in half.
+hangup_silence_s = 6.0
+
+# Calls shorter than this are discarded as false triggers (line noise, a
+# handset knocked off the cradle, a wrong number).
+min_call_s = 10.0
+
+# Hard stop, so a handset left off-hook can't record forever.
+max_call_s = 3600.0
+
+# Frames quieter than this are never treated as speech, regardless of what
+# the VAD says. Guards against line hiss triggering a recording.
+noise_floor_dbfs = -50.0
+
+
+[transcribe]
+# faster-whisper model. Telephone audio is narrowband, so bigger is not always
+# better. small.en is the sweet spot on CPU; use distil-large-v3 on a GPU.
+#   tiny.en  base.en  small.en  medium.en  distil-large-v3
+model = "small.en"
+
+# auto | cpu | cuda
+device = "auto"
+
+# int8 is fastest on CPU. Use float16 on a GPU.
+compute_type = "int8"
+
+# 1 is fast and usually fine. 5 is slower and slightly more accurate.
+beam_size = 1
+
+language = "en"
+
+
+[extract]
+# Local LLM that turns the raw transcript into work-order fields.
+base_url = "http://127.0.0.1:11434"
+
+# Any Ollama model. gemma3:4b is a good balance on a normal work PC.
+#   gemma3:1b  -- fastest, weakest at addresses
+#   gemma3:4b  -- recommended
+#   gemma3:12b -- best, needs ~10 GB RAM
+model = "gemma3:4b"
+
+temperature = 0.0
+num_ctx = 8192
+
+# Transcripts longer than this are extracted in chunks and merged.
+chunk_chars = 12000
+
+# Request timeout in seconds for a single extraction call.
+timeout_s = 180
+
+
+[output]
+dir = "output"
+
+# Keep the call audio on disk after transcribing. OFF by default -- audio is
+# overwritten and deleted as soon as the transcript exists. Turn this on only
+# while you are testing, then turn it back off.
+keep_audio = false
+
+show_popup = true
+copy_to_clipboard = true
+save_transcript = true
+
+
+[business]
+# Optional. Printed at the top of the work order.
+name = ""
+
+# Optional. Helps the model resolve partial addresses like "on Maple, here in
+# town" into something a tech can navigate to. Leave blank to disable.
+default_service_area = ""

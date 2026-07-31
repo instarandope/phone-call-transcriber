@@ -1,0 +1,19 @@
+# Audio capture from the LRX-40USB (or any USB audio input)
+sounddevice>=0.4.6
+soundfile>=0.12.1
+numpy>=1.24
+soxr>=0.3.7
+
+# Call start/stop detection
+webrtcvad-wheels>=2.0.14
+
+# On-device speech-to-text
+faster-whisper>=1.0.3
+
+# Local LLM extraction (Ollama HTTP API)
+requests>=2.31
+
+# Clipboard + tray
+pyperclip>=1.8.2
+pystray>=0.19.5
+Pillow>=10.0
