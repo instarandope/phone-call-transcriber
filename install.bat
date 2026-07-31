@@ -177,9 +177,12 @@ echo.
 
 echo.
 echo   Next - all of these are double-clickable, no typing needed:
-echo     devices.bat   - find your adapter's name for config.toml
-echo     doctor.bat    - check everything is ready
-echo     levels.bat    - meter your phone line, get the threshold values
-echo     run.bat       - start listening for calls
+echo     devices.bat        - find your adapter's name for config.toml
+echo     doctor.bat         - check everything is ready
+echo     levels.bat         - meter your phone line, get the threshold values
+echo.
+echo   Then start it:
+echo     start-hidden.vbs   - background, tray icon only, nothing in the taskbar
+echo     run.bat            - with a console window you can watch
 echo.
 pause

@@ -21,8 +21,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
 
-    _setup_logging(args.verbose)
-    cfg = config.load(Path(args.config) if args.config else None, root=_root())
+    root = _root()
+    _setup_logging(args.verbose, root)
+    cfg = config.load(Path(args.config) if args.config else None, root=root)
 
     for warning in cfg.warnings:
         logging.warning("config: %s", warning)
@@ -77,15 +78,61 @@ def _root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _setup_logging(verbose: bool) -> None:
+LOG_FILENAME = "call-transcriber.log"
+
+
+def _setup_logging(verbose: bool, root: Path) -> None:
+    """Log to the console when there is one, and always to a file.
+
+    The file matters more than it looks. Started from the tray shortcut there
+    is no console at all, so without it a failure to find the adapter would be
+    completely silent -- no window, no icon, no explanation.
+    """
+    handlers: list[logging.Handler] = []
+
+    # pythonw.exe leaves sys.stderr as None, and a StreamHandler over None
+    # raises on the first record rather than at construction.
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler())
+
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        handlers.append(
+            RotatingFileHandler(
+                root / LOG_FILENAME, maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+            )
+        )
+    except OSError:
+        pass  # read-only folder; the console handler is still there
+
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s  %(levelname)-7s %(message)s",
-        datefmt="%H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=handlers,
     )
     # These are chatty at INFO and say nothing useful here.
     logging.getLogger("faster_whisper").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def _fatal(message: str) -> int:
+    """Report a startup failure, including when there is no console to see it."""
+    logging.error("%s", message)
+    if sys.stderr is None:
+        # Started from the tray shortcut: a dialog is the only way to say so.
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Call Transcriber could not start", message)
+            root.destroy()
+        except Exception:
+            pass
+    return 1
 
 
 # -- commands --------------------------------------------------------------
@@ -379,8 +426,7 @@ def _cmd_run(cfg, use_tray: bool) -> int:
 
         transcribe.load_model(cfg.transcribe)
     except Exception as exc:
-        logging.error("%s", exc)
-        return 1
+        return _fatal(str(exc))
 
     from . import extract
 
@@ -403,8 +449,7 @@ def _cmd_run(cfg, use_tray: bool) -> int:
         runner.stop()
 
     if runner.error is not None:
-        logging.error("%s", runner.error)
-        return 1
+        return _fatal(str(runner.error))
     return 0
 
 

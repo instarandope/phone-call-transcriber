@@ -12,6 +12,9 @@ transcript*.txt
 work_order*.txt
 extracted*.json
 
+# Logs
+call-transcriber.log*
+
 # Local configuration (may contain business details / paths)
 config.toml
 .env

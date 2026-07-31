@@ -179,9 +179,31 @@ then lift it and stay quiet, then talk. From those three it prints the two
 threshold values to paste into `config.toml`. The defaults are reasonable
 guesses; these are measurements.
 
-Once every `doctor.bat` line reads `[ok]`, you are done. If you let the installer
-add it to startup, it is already running invisibly in the background —
-otherwise double-click **`run.bat`**.
+Once every `doctor.bat` line reads `[ok]`, you are done. See
+[Running it in the background](#running-it-in-the-background) for how to start
+it.
+
+## Running it in the background
+
+Double-click **`start-hidden.vbs`**.
+
+No console window, no taskbar button — just a small icon in the notification
+area at the right-hand end of the taskbar. Right-click it for the current
+status, to start or stop a recording, to open the work-order folder, or to
+quit. It turns **red while recording**.
+
+If you let `install.bat` add it to startup, this is already what happens when
+Windows boots, and you never need to launch anything.
+
+`run.bat` is the other way to start it: same program, but with a console window
+you can watch. Useful while you are setting things up or chasing a problem, and
+it does show in the taskbar.
+
+Either way, everything is written to **`call-transcriber.log`** in the project
+folder. That is the first place to look if it started but does not seem to be
+doing anything — particularly when running hidden, where there is no console
+for a message to appear in. If it cannot start at all, it says so in a dialog
+box rather than failing silently.
 
 ## The double-clickable scripts
 
@@ -190,7 +212,8 @@ Everything can be run by double-clicking, so you never need a terminal:
 | File | What it does |
 |---|---|
 | **`install.bat`** | One-time setup. Safe to re-run; it skips whatever is already done. |
-| **`run.bat`** | Start listening for calls. |
+| **`start-hidden.vbs`** | Start in the background: tray icon only, no window. |
+| **`run.bat`** | Start with a console window you can watch. |
 | **`devices.bat`** | List audio inputs, to find the adapter's name for `config.toml`. |
 | **`doctor.bat`** | Check everything: packages, adapter, models, output folder. |
 | **`levels.bat`** | Meter the phone line and print the threshold values to use. |
