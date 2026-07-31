@@ -4,9 +4,19 @@
 
 [audio]
 # Substring matched (case-insensitive) against input device names to find the
-# LRX-40USB. Run `run.bat devices` to see what your adapter reports itself as.
-# Common strings: "LRX", "USB Audio", "USB PnP".
-device_match = "LRX"
+# adapter. Run `run.bat devices` to see what yours reports itself as -- most
+# telephone adapters do NOT say "LRX" anywhere; they show up under a generic
+# name like "Microphone (USB PnP Audio Device)".
+#
+# Windows lists the same device once per driver stack, so several entries with
+# the same name are normal and are handled automatically.
+device_match = "USB PnP"
+
+# Escape hatch, for when two genuinely different devices share a name -- a
+# phone adapter and a USB headset, say. Set it to one of the numbers from
+# `run.bat devices` to pin that exact entry. Leave at -1 to match by name,
+# which survives Windows renumbering devices when you plug something in.
+device_index = -1
 
 # Leave these alone unless `run.bat doctor` tells you to change them.
 sample_rate = 16000

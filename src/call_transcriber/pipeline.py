@@ -172,7 +172,9 @@ class Runner:
 
     def _loop(self) -> None:
         try:
-            device = audio_mod.find_device(self.cfg.audio.device_match)
+            device = audio_mod.find_device(
+                self.cfg.audio.device_match, self.cfg.audio.device_index
+            )
             log.info("listening on %s", device)
 
             detector = CallDetector(

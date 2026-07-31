@@ -17,6 +17,9 @@ from pathlib import Path
 @dataclass
 class AudioConfig:
     device_match: str = "LRX"
+    # -1 means "match by name". Set to a number from `run.bat devices` only
+    # when several genuinely different devices share a name.
+    device_index: int = -1
     sample_rate: int = 16000
     stereo_mode: str = "auto"  # auto | mixed | split
 

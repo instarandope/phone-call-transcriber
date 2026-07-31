@@ -101,16 +101,41 @@ def _cmd_devices() -> int:
         return 1
 
     if not devices:
-        print("No audio input devices found.")
+        print("No audio input devices found. Is the adapter plugged in?")
         return 1
 
-    print("Audio inputs:\n")
+    # Windows lists every device once per driver stack, so a single adapter
+    # shows up three or four times under near-identical names. Presenting the
+    # raw list makes it look like four devices when there is one.
+    groups: dict[str, list] = {}
     for device in devices:
-        print(f"  {device}")
-    print(
-        "\nPut a distinctive piece of your adapter's name into audio.device_match\n"
-        "in config.toml (matching is case-insensitive)."
-    )
+        groups.setdefault(device.identity, []).append(device)
+
+    print(f"{len(groups)} input device(s), listed by Windows as {len(devices)} entries.")
+    print("Each device appears once per driver stack; those are grouped here.\n")
+
+    for number, entries in enumerate(groups.values(), start=1):
+        best = audio.best_hostapi(entries)
+        print(f"  {number}. {best.name}")
+        print(
+            f"       would use index {best.index} via {best.hostapi or 'default'}, "
+            f"{best.channels}ch @ {best.samplerate:.0f} Hz"
+        )
+        others = [e for e in entries if e.index != best.index]
+        if others:
+            print(
+                "       also listed as "
+                + ", ".join(f"[{e.index}] {e.hostapi or 'unknown'}" for e in others)
+            )
+        print()
+
+    print("Set audio.device_match in config.toml to part of the right name -- matching")
+    print("is case-insensitive, and choosing the driver stack happens automatically.")
+    print()
+    print("Not sure which is the phone adapter? Pick the likely one, then run")
+    print("`run.bat levels` and talk into the handset. If the meter moves, it is the")
+    print("right one. If two different devices share a name, set audio.device_index")
+    print("to one of the numbers above instead.")
     return 0
 
 
@@ -149,7 +174,7 @@ def _cmd_doctor(cfg) -> int:
 
     print("\nAudio")
     try:
-        device = audio.find_device(cfg.audio.device_match)
+        device = audio.find_device(cfg.audio.device_match, cfg.audio.device_index)
         check(f"adapter found: {device}", True)
     except audio.AudioError as exc:
         check(f"adapter matching {cfg.audio.device_match!r}", False, str(exc))
@@ -237,7 +262,7 @@ def _cmd_levels(cfg, seconds: int) -> int:
     from . import audio
 
     try:
-        device = audio.find_device(cfg.audio.device_match)
+        device = audio.find_device(cfg.audio.device_match, cfg.audio.device_index)
     except audio.AudioError as exc:
         print(f"error: {exc}")
         return 1

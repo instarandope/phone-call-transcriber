@@ -26,15 +26,41 @@ class AudioError(RuntimeError):
     """Raised for anything the user can fix by plugging something in."""
 
 
+# Windows exposes the same physical device through several driver stacks, so
+# one adapter appears four times in the list. WASAPI is the modern path and
+# reports the device's real format; the others are legacy shims that report a
+# generic 2ch/44100 regardless of the hardware.
+HOSTAPI_PREFERENCE = (
+    "Windows WASAPI",
+    "Windows DirectSound",
+    "MME",
+    "Windows WDM-KS",
+)
+
+# MME truncates device names to 31 characters, which is why the same adapter
+# can appear under two slightly different names in one listing.
+MME_NAME_LIMIT = 31
+
+
 @dataclass(frozen=True)
 class InputDevice:
     index: int
     name: str
     channels: int
     samplerate: float
+    hostapi: str = ""
 
     def __str__(self) -> str:
-        return f"[{self.index}] {self.name} ({self.channels}ch @ {self.samplerate:.0f} Hz)"
+        api = f", {self.hostapi}" if self.hostapi else ""
+        return (
+            f"[{self.index}] {self.name} "
+            f"({self.channels}ch @ {self.samplerate:.0f} Hz{api})"
+        )
+
+    @property
+    def identity(self) -> str:
+        """Key for deciding whether two entries are the same hardware."""
+        return self.name.strip().lower()[:MME_NAME_LIMIT]
 
 
 def _load_sounddevice():
@@ -55,30 +81,59 @@ def _load_sounddevice():
 
 def list_input_devices() -> list[InputDevice]:
     _load_sounddevice()
+    try:
+        hostapis = [api["name"] for api in sd.query_hostapis()]
+    except Exception:
+        hostapis = []
+
     devices = []
     for index, info in enumerate(sd.query_devices()):
         if info["max_input_channels"] > 0:
+            api_index = info.get("hostapi", -1)
             devices.append(
                 InputDevice(
                     index=index,
                     name=info["name"],
                     channels=int(info["max_input_channels"]),
                     samplerate=float(info["default_samplerate"]),
+                    hostapi=hostapis[api_index] if 0 <= api_index < len(hostapis) else "",
                 )
             )
     return devices
 
 
-def find_device(match: str) -> InputDevice:
-    """Find the adapter by name substring.
+def best_hostapi(candidates: list[InputDevice]) -> InputDevice:
+    """Of several entries for one device, take the best driver stack."""
+    for api in HOSTAPI_PREFERENCE:
+        for device in candidates:
+            if device.hostapi == api:
+                return device
+    return candidates[0]
 
-    Matching on the name rather than the index matters: Windows renumbers audio
-    devices when anything else is plugged in or removed, so a hardcoded index
-    silently starts recording the webcam mic instead.
+
+def find_device(match: str, index: int = -1) -> InputDevice:
+    """Find the adapter, by explicit index if given or by name substring.
+
+    Name matching is the default because Windows renumbers audio devices when
+    anything else is plugged in or removed, so a pinned index quietly starts
+    recording the webcam mic instead. The index is there as an escape hatch for
+    when several devices share a name and nothing else tells them apart.
     """
     devices = list_input_devices()
     if not devices:
         raise AudioError("no audio input devices found at all -- is the adapter plugged in?")
+
+    if index is not None and index >= 0:
+        for device in devices:
+            if device.index == index:
+                return device
+        listing = "\n".join(f"    {d}" for d in devices)
+        raise AudioError(
+            f"audio.device_index is {index}, which is not an input device right now.\n"
+            f"  Inputs available:\n{listing}\n"
+            f"  Indexes shift when USB devices are plugged or unplugged -- re-run "
+            f"`run.bat devices` and update it, or set it back to -1 to match by name."
+        )
 
     needle = match.strip().lower()
     if not needle:
@@ -92,13 +147,22 @@ def find_device(match: str) -> InputDevice:
             f"  Inputs available right now:\n{listing}\n"
             f"  Set audio.device_match in config.toml to part of the right name."
         )
-    if len(hits) > 1:
-        listing = "\n".join(f"    {d}" for d in hits)
-        raise AudioError(
-            f"{match!r} matches {len(hits)} devices, so I can't tell which is the "
-            f"adapter:\n{listing}\n  Make audio.device_match more specific."
-        )
-    return hits[0]
+
+    # Several hits with the same name are the same adapter seen through
+    # different Windows driver stacks, not different hardware. That is the
+    # normal case, and picking the best stack is the right answer rather than
+    # an error.
+    families = {d.identity for d in hits}
+    if len(families) == 1:
+        return best_hostapi(hits)
+
+    listing = "\n".join(f"    {d}" for d in hits)
+    raise AudioError(
+        f"{match!r} matches {len(families)} different devices, so I can't tell "
+        f"which is the adapter:\n{listing}\n"
+        f"  Either make audio.device_match more specific, or set audio.device_index\n"
+        f"  in config.toml to one of the numbers in brackets above."
+    )
 
 
 class Capture:
