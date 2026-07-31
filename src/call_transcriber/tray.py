@@ -55,8 +55,14 @@ def _run(runner, cfg) -> None:
             return image
 
         def status_text(_item):
+            queued = runner.pending
             if runner.state is State.IN_CALL:
-                return "RECORDING"
+                return "RECORDING" + (f"  ({queued} in the queue)" if queued else "")
+            if queued:
+                # A burst of calls processes one at a time, so a work order can
+                # appear ten minutes after the call. Saying how many are in
+                # front of it is the difference between waiting and worrying.
+                return f"Processing... ({queued} to go)"
             if runner.manual:
                 return f"Ready ({runner.calls_handled} recorded today)"
             if runner.paused.is_set():
@@ -98,6 +104,10 @@ def _run(runner, cfg) -> None:
                     toggle_pause,
                     visible=not runner.manual,
                 ),
+                pystray.MenuItem(
+                    "Show last work order",
+                    lambda _icon, _item: runner.show_last_work_order(),
+                ),
                 pystray.MenuItem("Open work orders", open_output),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Quit", quit_app),
@@ -108,13 +118,16 @@ def _run(runner, cfg) -> None:
             """Redraw the icon so a glance tells you whether it is recording."""
             last = None
             while not runner.stop_event.wait(0.3):
-                current = runner.state is State.IN_CALL
+                # Track the queue too, so the menu text is right when opened.
+                current = (runner.state is State.IN_CALL, runner.pending)
                 if current == last:
                     continue
+                recording = current[0]
                 try:
-                    icon.icon = icon_image(current)
+                    icon.icon = icon_image(recording)
                     icon.title = (
-                        "Call Transcriber - RECORDING" if current else "Call Transcriber"
+                        "Call Transcriber - RECORDING" if recording
+                        else "Call Transcriber"
                     )
                     icon.update_menu()
                 except Exception as exc:

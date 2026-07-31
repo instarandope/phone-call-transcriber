@@ -279,6 +279,7 @@ Everything can be run by double-clicking, so you never need a terminal:
 | **`doctor.bat`** | Check everything: packages, adapter, models, output folder. |
 | **`levels.bat`** | Meter the phone line and print the threshold values to use. |
 | **`prompt.bat`** | Show exactly what the model is told to extract from a call. |
+| **`last.bat`** | Bring back the most recent work order and re-copy it. |
 
 The less common ones need a terminal, because they take an argument. Open the
 folder in File Explorer, click the address bar, type `cmd` and press Enter — a
@@ -308,6 +309,19 @@ To hear what the adapter is actually capturing, turn on `keep_audio` in
 next to each work order. **Turn it back off when you are done** — and run
 `run.bat purge` to shred the recordings you kept.
 
+## If you close the window by accident
+
+Nothing is lost — the popup is not the record. Every call writes
+`work_order.txt`, `transcript.txt` and `extracted.json` into its own folder the
+moment it finishes, before the window ever appears.
+
+To get the last one back:
+
+- **Tray icon → Show last work order.** Reopens it and puts it on the clipboard
+  again.
+- Or double-click **`last.bat`**, which prints it and re-copies it.
+- Or tray icon → **Open work orders** and browse by date.
+
 ## Back-to-back calls
 
 Recording and processing are separate threads, so the app keeps listening while
@@ -317,9 +331,13 @@ top of another.
 What can happen on a busy stretch is that work orders start arriving late.
 Transcription and extraction are queued and run one at a time — deliberately,
 because running two at once on the same CPU makes both slower rather than
-finishing sooner. So if a call takes two minutes to process and you take three
-calls in five minutes, the third work order shows up a few minutes after you
-hang up. The queue drains during the first gap.
+finishing sooner. So if a call takes three minutes to process and you take five
+calls back to back, the last work order lands a while after you hang up. The
+queue drains during the first gap, and nothing is dropped.
+
+**The tray icon says how deep the queue is** — hover or right-click it and you
+will see `Processing... (3 to go)`. That is the difference between waiting and
+wondering whether something broke.
 
 If that lag becomes a problem, the fix is to make each call cheaper rather than
 to run more at once: drop `transcribe.model` to `base.en`, or `extract.model`

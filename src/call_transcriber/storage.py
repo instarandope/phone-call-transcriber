@@ -165,6 +165,41 @@ def purge_audio(root: Path, everything: bool = False) -> tuple[int, int]:
     return files, freed
 
 
+def latest_work_order(root: Path) -> Path | None:
+    """The most recently written work order, for reopening a closed window."""
+    if not root.exists():
+        return None
+    written = list(root.rglob("work_order.txt"))
+    if not written:
+        return None
+    return max(written, key=lambda p: p.stat().st_mtime)
+
+
+def read_call(folder: Path) -> dict:
+    """Load a finished call back off disk.
+
+    The popup is not the record -- these files are. Reading them back is how a
+    window closed by accident stops being a lost call.
+    """
+    out: dict = {"folder": folder, "work_order": "", "transcript": "", "extracted": {}}
+
+    order = folder / "work_order.txt"
+    if order.exists():
+        out["work_order"] = order.read_text(encoding="utf-8")
+
+    transcript = folder / "transcript.txt"
+    if transcript.exists():
+        out["transcript"] = transcript.read_text(encoding="utf-8")
+
+    extracted = folder / "extracted.json"
+    if extracted.exists():
+        try:
+            out["extracted"] = json.loads(extracted.read_text(encoding="utf-8"))
+        except ValueError:
+            pass
+    return out
+
+
 def open_folder(path: Path) -> None:
     """Reveal a folder in the OS file manager."""
     try:

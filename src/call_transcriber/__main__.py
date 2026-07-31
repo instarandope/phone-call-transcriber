@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_doctor(cfg)
     if args.command == "prompt":
         return _cmd_prompt(cfg)
+    if args.command == "last":
+        return _cmd_last(cfg)
     if args.command == "levels":
         return _cmd_levels(cfg, args.seconds)
     if args.command == "test":
@@ -65,6 +67,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("devices", help="list audio input devices")
     sub.add_parser("doctor", help="check the setup")
     sub.add_parser("prompt", help="show exactly what the model is told to extract")
+    sub.add_parser("last", help="reprint the most recent work order")
     levels = sub.add_parser("levels", help="measure your line and suggest thresholds")
     levels.add_argument(
         "--seconds", type=int, default=45, help="how long to listen (default 45)"
@@ -206,6 +209,23 @@ def _cmd_devices() -> int:
     print("`run.bat levels` and talk into the handset. If the meter moves, it is the")
     print("right one. If two different devices share a name, set audio.device_index")
     print("to one of the numbers above instead.")
+    return 0
+
+
+def _cmd_last(cfg) -> int:
+    """Reprint the most recent work order and put it back on the clipboard."""
+    from . import notify, storage
+
+    path = storage.latest_work_order(cfg.output_dir)
+    if path is None:
+        print(f"No work orders yet in {cfg.output_dir}.")
+        return 1
+
+    call = storage.read_call(path.parent)
+    print(call["work_order"])
+    print(f"  from {path.parent}")
+    if cfg.output.copy_to_clipboard and notify.copy(call["work_order"]):
+        print("  copied to the clipboard - just paste")
     return 0
 
 

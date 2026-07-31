@@ -198,6 +198,8 @@ class Runner:
         self.paused = threading.Event()
         self.state = State.IDLE
         self.calls_handled = 0
+        self._pending = 0
+        self._pending_lock = threading.Lock()
         self._frames_seen = 0
         self._frames_in_call = 0
         self._warned_hot = False
@@ -212,6 +214,39 @@ class Runner:
     @property
     def manual(self) -> bool:
         return self.cfg.control.mode == "manual"
+
+    @property
+    def pending(self) -> int:
+        """Calls recorded but not yet turned into a work order."""
+        with self._pending_lock:
+            return self._pending
+
+    def show_last_work_order(self) -> bool:
+        """Put the most recent work order back on screen and on the clipboard.
+
+        Closing the window used to lose it -- the files were always on disk,
+        but only if you knew which dated folder to go looking in.
+        """
+        path = storage.latest_work_order(self.cfg.output_dir)
+        if path is None:
+            log.warning("no work orders yet in %s", self.cfg.output_dir)
+            return False
+
+        call = storage.read_call(path.parent)
+        copied = notify.copy(call["work_order"]) if self.cfg.output.copy_to_clipboard else False
+
+        if self.ui is not None:
+            self.ui.request(
+                notify.Popup(
+                    title=workorder.headline(call["extracted"]),
+                    work_order=call["work_order"],
+                    transcript=call["transcript"],
+                    folder=call["folder"],
+                    copied=copied,
+                )
+            )
+        log.info("reopened %s", path)
+        return True
 
     def toggle_recording(self) -> bool | None:
         """Start or stop recording by hand. Returns the new state.
@@ -342,10 +377,24 @@ class Runner:
 
     def _submit(self, call: Call) -> None:
         self.calls_handled += 1
-        log.info(
-            "call #%d ended after %.0fs (%s) -- processing",
-            self.calls_handled, call.duration_s, call.ended_reason,
-        )
+        with self._pending_lock:
+            self._pending += 1
+            waiting = self._pending
+
+        # One worker by design: two transcriptions at once on the same CPU
+        # finish later than two in sequence. So a burst of calls queues, and
+        # saying how deep it is beats a work order appearing from nowhere ten
+        # minutes later.
+        if waiting > 1:
+            log.info(
+                "call #%d ended after %.0fs (%s) -- queued, %d ahead of it",
+                self.calls_handled, call.duration_s, call.ended_reason, waiting - 1,
+            )
+        else:
+            log.info(
+                "call #%d ended after %.0fs (%s) -- processing",
+                self.calls_handled, call.duration_s, call.ended_reason,
+            )
         self._pool.submit(self._safe_process, call)
 
     def _safe_process(self, call: Call) -> None:
@@ -356,6 +405,11 @@ class Runner:
         finally:
             # Drop the reference promptly; an hour of stereo audio is ~460 MB.
             call.audio = np.zeros((0, 1), dtype=np.int16)
+            with self._pending_lock:
+                self._pending -= 1
+                left = self._pending
+            if left:
+                log.info("%d call(s) still waiting to be processed", left)
 
     def _on_state(self, state: State) -> None:
         self.state = state
