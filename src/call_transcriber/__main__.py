@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_levels(cfg, args.seconds)
     if args.command == "test":
         return _cmd_test(cfg, Path(args.file))
+    if args.command == "compare":
+        return _cmd_compare(cfg, Path(args.file), args.models)
     if args.command == "purge":
         return _cmd_purge(cfg, args.purge_all)
     return _cmd_run(cfg, use_tray=args.tray)
@@ -69,6 +71,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     test = sub.add_parser("test", help="process an existing audio file")
     test.add_argument("file", help="path to a .wav/.mp3/.m4a recording")
+    compare = sub.add_parser(
+        "compare", help="run one recording through several extraction models"
+    )
+    compare.add_argument("file", help="path to a .wav/.mp3/.m4a recording")
+    compare.add_argument(
+        "--models",
+        required=True,
+        help="comma-separated Ollama models, e.g. gemma3:4b,gemma3n:e4b",
+    )
     purge = sub.add_parser("purge", help="securely delete kept recordings")
     purge.add_argument(
         "--all",
@@ -452,6 +463,89 @@ def _bar(level: float, width: int = 40) -> str:
     """A meter from -80 dBFS to 0."""
     filled = int(max(0.0, min(1.0, (level + 80) / 80)) * width)
     return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
+def _cmd_compare(cfg, path: Path, models: str) -> int:
+    """Run one recording through several extraction models.
+
+    Which model to use is an empirical question about a specific machine and a
+    specific trade's vocabulary, and no amount of reading benchmarks settles
+    it. Transcription happens once and is shared, so what is being compared is
+    the extraction step alone.
+    """
+    import copy
+    import time as _time
+
+    from . import extract, storage, transcribe, workorder
+
+    if not path.exists():
+        print(f"error: {path} does not exist")
+        return 1
+
+    wanted = [m.strip() for m in models.split(",") if m.strip()]
+    if not wanted:
+        print("error: --models is empty")
+        return 1
+
+    audio, rate = storage.read_wav(path)
+    print(f"Transcribing {path.name} once with {cfg.transcribe.model} ...")
+    started = _time.monotonic()
+    result = transcribe.transcribe(audio, rate, cfg.transcribe, cfg.audio.stereo_mode)
+    transcribe_s = _time.monotonic() - started
+
+    if result.is_empty:
+        print("Nothing was transcribed, so there is nothing to compare.")
+        return 1
+    print(f"  {transcribe_s:.0f}s, {len(result.segments)} segments\n")
+
+    scored = []
+    for model in wanted:
+        print("=" * 72)
+        print(f"  {model}")
+        print("=" * 72)
+
+        settings = copy.copy(cfg.extract)
+        settings.model = model
+        started = _time.monotonic()
+        try:
+            data = extract.extract(result.text, settings, cfg.business)
+        except extract.ExtractionError as exc:
+            print(f"  failed: {exc}\n")
+            continue
+        elapsed = _time.monotonic() - started
+
+        print(workorder.render(data, duration_s=result.duration_s, business=cfg.business))
+        filled = sum(
+            1 for f in fields_with_values(data)
+        )
+        print(f"  {elapsed:.0f}s, {filled} fields filled\n")
+        scored.append((model, elapsed, filled))
+
+    if len(scored) > 1:
+        print("=" * 72)
+        print(f"  {'model':<24} {'seconds':>9} {'fields':>8}")
+        print("-" * 72)
+        for model, elapsed, filled in scored:
+            print(f"  {model:<24} {elapsed:>9.0f} {filled:>8}")
+        print()
+        print("  More fields filled is not automatically better -- a model that")
+        print("  invents an address scores well here and sends a tech to the wrong")
+        print("  house. Read the work orders above against the transcript.")
+    return 0
+
+
+def fields_with_values(data: dict) -> list:
+    from . import fields
+
+    out = []
+    for f in fields.FIELDS:
+        value = data.get(f.name)
+        if f.kind == "list":
+            if value:
+                out.append(f.name)
+        elif value not in (None, "", "unknown"):
+            out.append(f.name)
+    return out
 
 
 def _cmd_purge(cfg, everything: bool) -> int:

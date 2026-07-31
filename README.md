@@ -280,6 +280,7 @@ Command Prompt opens already pointed at the folder. Then:
 
 ```
 run.bat test somecall.wav    process an existing recording
+run.bat compare somecall.wav --models gemma3:4b,gemma3n:e4b
 run.bat purge                shred any kept audio
 run.bat purge --all          shred transcripts and work orders too
 ```
@@ -457,10 +458,26 @@ vocabulary = "torsion spring, cables, rollers, tracks, panels, opener, keypad, d
 Add whatever you see misheard. This costs nothing at runtime and is usually
 more effective than moving up a model size.
 
-**Only then reach for a bigger model.** `small.en` → `medium.en` roughly
-triples transcription time; check `processing_s` in `extracted.json` before and
-after and decide whether the accuracy is worth it. Same for `gemma3:4b` →
-`gemma3:12b`, which needs about 10 GB of RAM.
+**Only then reach for a bigger model**, and measure rather than guess. Keep one
+call with `keep_audio = true` and run it through several:
+
+```
+ollama pull gemma3n:e4b
+run.bat compare output\2026-07-31\160012-roomie\call.wav --models gemma3:4b,gemma3n:e4b,gemma3:12b
+```
+
+It transcribes once, then extracts with each model in turn, printing every work
+order plus a table of how long each took. Any model in the [Ollama
+library](https://ollama.com/library) works. `gemma3n` is Google's on-device
+line — `e4b` benchmarks above `gemma3:4b` and is built for hardware like this,
+so it is the first one worth trying.
+
+Judge by reading the work orders against the transcript, not by the field
+count. A model that invents a plausible address fills more fields and sends a
+tech to the wrong house.
+
+For speech, `small.en` → `medium.en` roughly triples transcription time. Check
+`processing_s` in `extracted.json` before and after.
 
 ## Configuration worth knowing about
 
