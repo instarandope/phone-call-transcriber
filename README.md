@@ -494,6 +494,24 @@ tech to the wrong house.
 For speech, `small.en` → `medium.en` roughly triples transcription time. Check
 `processing_s` in `extracted.json` before and after.
 
+## Long calls
+
+An eleven-minute call is around 9,000 characters of transcript, and a capable
+local model takes several minutes to work through that on an older CPU. If
+`extract.timeout_s` is set too low the transcript is saved but the work order
+comes back empty, with the reason printed in red at the top of the window.
+
+The default is 600 seconds. Raise it rather than lowering the model, since
+nothing is waiting on the result.
+
+**`chunk_chars` is not a speed control.** It caps how much text goes into one
+request; anything longer is split, extracted piece by piece, and merged.
+Lowering it does not make extraction faster — the same words still get
+processed — and it costs accuracy, because each piece sees only part of the
+call. A time or price settled at the end can be lost, or taken from an earlier
+mention that was later withdrawn. Leave it at 12,000 unless you routinely take
+calls longer than about fifteen minutes.
+
 ## Configuration worth knowing about
 
 Full documentation is in the comments of

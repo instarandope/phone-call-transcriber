@@ -161,8 +161,12 @@ def test_a_dead_extractor_still_saves_the_transcript(cfg, call, monkeypatch, stu
     result = pipeline.process_call(call, cfg)
 
     assert "banging noise" in (result.folder / "transcript.txt").read_text(encoding="utf-8")
-    assert any("Ollama is not running" in w for w in result.warnings)
     assert "Nothing could be extracted" in result.work_order
+
+    # A failure, not a note -- and it says how to pick the call back up.
+    assert any("Ollama is not running" in p for p in result.problems)
+    assert any("run.bat compare" in p for p in result.problems)
+    assert not result.warnings
 
 
 def test_silence_produces_a_warning_rather_than_a_confident_blank_form(
@@ -175,7 +179,7 @@ def test_silence_produces_a_warning_rather_than_a_confident_blank_form(
     )
 
     result = pipeline.process_call(call, cfg)
-    assert any("Nothing intelligible" in w for w in result.warnings)
+    assert any("Nothing intelligible" in p for p in result.problems)
     assert "Nothing could be extracted" in result.work_order
 
 
@@ -342,3 +346,18 @@ def test_manual_mode_never_warns_about_a_busy_input(cfg, caplog):
         _run_frames(runner, pipeline.State.IN_CALL, runner.HOT_INPUT_AFTER_FRAMES * 2)
 
     assert "hearing the room" not in caplog.text
+
+
+def test_a_level_note_is_not_dressed_up_as_a_failure(cfg, stub_models):
+    """A quiet recording that transcribed fine is not a failure."""
+    quiet = Call(
+        audio=_tone(500, 16000 * 3),
+        sample_rate=16000,
+        started_at=1785500000.0,
+        duration_s=3.0,
+        ended_reason="hangup",
+    )
+    result = pipeline.process_call(quiet, cfg)
+
+    assert any("record level dial" in w for w in result.warnings)
+    assert result.problems == []

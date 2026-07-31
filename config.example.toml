@@ -155,11 +155,21 @@ think = false
 temperature = 0.0
 num_ctx = 8192
 
-# Transcripts longer than this are extracted in chunks and merged.
+# Transcripts longer than this are split into pieces, extracted separately, and
+# merged. It is a ceiling on how much text goes in one request, not a speed
+# control -- lowering it does NOT make extraction faster. It makes it worse:
+# each piece sees only part of the call, so a time or a price agreed near the
+# end can be missed or taken from an earlier, superseded mention.
+#
+# A ten-minute call is roughly 9,000 characters, so most calls never reach
+# this. Raise it if you take very long calls; leave it alone otherwise.
 chunk_chars = 12000
 
-# Request timeout in seconds for a single extraction call.
-timeout_s = 180
+# How long to let one extraction run before giving up. An eleven-minute call
+# takes a capable model several minutes on an older CPU, and this all happens
+# in the background, so being generous costs nothing. Too low and a long call
+# produces a transcript with no work order attached.
+timeout_s = 600
 
 
 [output]

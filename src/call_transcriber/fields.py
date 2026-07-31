@@ -26,6 +26,11 @@ class Field:
     # listed under STILL NEEDED whatever the model thinks, because whether a
     # field is blank is something we know rather than something to ask about.
     essential: bool = False
+    # When a long transcript is split, "first" keeps the earliest answer -- right
+    # for a name or address, stated once near the start. "last" keeps the most
+    # recent, which is what a negotiated time or price needs, since the earlier
+    # mentions are the ones that got rejected.
+    prefer: str = "first"
 
 
 FIELDS: tuple[Field, ...] = (
@@ -104,6 +109,7 @@ FIELDS: tuple[Field, ...] = (
         "one is settled on. Record the LAST time both sides accepted, not the "
         "first one mentioned, and check nothing later in the call overrides it. "
         "Null if nothing was booked.",
+        prefer="last",
     ),
     Field(
         name="existing_customer",
@@ -115,8 +121,13 @@ FIELDS: tuple[Field, ...] = (
     Field(
         name="price_discussed",
         label="PRICING",
-        prompt="Any figures quoted or agreed: service call fee, estimate range, "
-        "deposit, warranty coverage. Quote the numbers exactly as stated.",
+        prompt="Money that was discussed, and WHOSE figure it is. A price the "
+        "business quoted and a ceiling the caller set are different things and "
+        "must not be confused -- label them: \"quoted $89 service call\" versus "
+        "\"customer budget: up to $600\". If the caller says what they want to "
+        "spend and no price was quoted, record only their budget, said as theirs. "
+        "Quote figures exactly as spoken.",
+        prefer="last",
     ),
     Field(
         name="follow_up",

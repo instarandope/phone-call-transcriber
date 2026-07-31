@@ -63,7 +63,10 @@ class ExtractConfig:
     temperature: float = 0.0
     num_ctx: int = 8192
     chunk_chars: int = 12000
-    timeout_s: int = 180
+    # An eleven-minute call takes a capable local model several minutes on an
+    # older CPU. Processing is in the background, so a generous ceiling costs
+    # nothing when things work and only matters when something is stuck.
+    timeout_s: int = 600
 
 
 @dataclass

@@ -31,6 +31,10 @@ class Popup:
     work_order: str
     transcript: str = ""
     folder: Path | None = None
+    # Kept apart on purpose. A note about recording level and the reason
+    # extraction failed are not the same kind of thing, and listing them
+    # together sends people to investigate the wrong one.
+    problems: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     # Whether the pipeline already put this on the clipboard, so the window can
     # say so truthfully instead of claiming it either way.
@@ -151,12 +155,18 @@ class UiHost:
             frame, text=popup.title, font=("Segoe UI", 11, "bold"), anchor="w"
         ).pack(fill="x", pady=(0, 6))
 
-        if popup.warnings:
-            for message in popup.warnings:
-                ttk.Label(
-                    frame, text=f"! {message}", foreground=WARN_AMBER,
-                    wraplength=680, anchor="w", justify="left",
-                ).pack(fill="x", pady=(0, 4))
+        for message in popup.problems:
+            ttk.Label(
+                frame, text=f"FAILED: {message}", foreground=ERROR_RED,
+                font=("Segoe UI", 9, "bold"),
+                wraplength=680, anchor="w", justify="left",
+            ).pack(fill="x", pady=(0, 4))
+
+        for message in popup.warnings:
+            ttk.Label(
+                frame, text=f"Note: {message}", foreground=WARN_AMBER,
+                wraplength=680, anchor="w", justify="left",
+            ).pack(fill="x", pady=(0, 4))
 
         text = tk.Text(frame, wrap="none", font=("Consolas", 10), height=20)
         scroll_y = ttk.Scrollbar(frame, orient="vertical", command=text.yview)

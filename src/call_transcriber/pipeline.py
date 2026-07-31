@@ -36,6 +36,7 @@ class Result:
     transcript: str
     extracted: dict
     warnings: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
 
 
 CLIP_THRESHOLD = 32700  # int16 full scale is 32767
@@ -77,6 +78,7 @@ def level_warnings(audio: np.ndarray) -> list[str]:
 def process_call(call: Call, cfg, *, ui=None) -> Result:
     """Transcribe, extract, save and surface one finished call."""
     warnings: list[str] = level_warnings(call.audio)
+    problems: list[str] = []
     started = time.monotonic()
 
     # The recording is transcribed straight out of memory and, unless
@@ -90,7 +92,7 @@ def process_call(call: Call, cfg, *, ui=None) -> Result:
     transcript_text = result.text
 
     if result.is_empty:
-        warnings.append(
+        problems.append(
             "Nothing intelligible was transcribed -- check the adapter is "
             "tapping the handset and that [detect] noise_floor_dbfs isn't too high."
         )
@@ -104,8 +106,12 @@ def process_call(call: Call, cfg, *, ui=None) -> Result:
             extracted = extract.extract(transcript_text, cfg.extract, cfg.business)
         except extract.ExtractionError as exc:
             # The transcript is the expensive part and it survived, so save it
-            # with a warning rather than throwing the call away.
-            warnings.append(f"Field extraction failed: {exc}")
+            # and say how to retry rather than throwing the call away.
+            problems.append(f"{exc}")
+            problems.append(
+                "The transcript is saved. To retry this call once that is sorted: "
+                "run.bat compare --models " + cfg.extract.model
+            )
             extracted = extract.empty_result()
 
     order = workorder.render(
@@ -147,12 +153,16 @@ def process_call(call: Call, cfg, *, ui=None) -> Result:
                 work_order=order,
                 transcript=transcript_text,
                 folder=folder,
+                problems=problems,
                 warnings=warnings,
                 copied=copied,
             )
         )
 
-    return Result(folder, order, transcript_text, extracted, warnings)
+    for message in problems:
+        log.error("%s", message)
+
+    return Result(folder, order, transcript_text, extracted, warnings, problems)
 
 
 def process_file(path: Path, cfg, *, ui=None) -> Result:

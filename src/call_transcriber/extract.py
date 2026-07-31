@@ -364,6 +364,9 @@ def _merge(results: list[dict]) -> dict:
             elif f.kind == "enum":
                 if merged[f.name] in (None, "unknown") and value not in (None, "unknown"):
                     merged[f.name] = value
+            elif f.prefer == "last":
+                if value:
+                    merged[f.name] = value
             elif merged[f.name] in (None, "") and value:
                 merged[f.name] = value
     return merged
@@ -381,7 +384,13 @@ def _coerce(raw: dict) -> dict:
             if isinstance(value, str):
                 value = [value]
             if isinstance(value, list):
-                out[f.name] = [str(v).strip() for v in value if str(v).strip()]
+                # A model asked for an empty list sometimes writes ["None"]
+                # instead, which printed as a bullet point reading "- None".
+                out[f.name] = [
+                    str(v).strip()
+                    for v in value
+                    if str(v).strip() and str(v).strip().lower().rstrip(".") not in _NULLISH
+                ]
         elif f.kind == "enum":
             if isinstance(value, str) and value in f.choices:
                 out[f.name] = value
