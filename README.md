@@ -245,6 +245,21 @@ answering, extraction waits and retries for up to 50 seconds rather than giving
 up. And if it never answers, the transcript is still saved; only the field
 extraction is lost, and the work order says so.
 
+## Updating
+
+Download the ZIP, extract, and copy the files over your existing folder,
+choosing **Replace the files in the destination**. Your `.venv`, your
+`config.toml` and your `output` folder are not in the ZIP, so they survive
+untouched.
+
+**Then double-click `install.bat` again.** New code sometimes needs a package
+your virtual environment does not have yet, and until it is installed the
+feature that needs it simply refuses to start. `install.bat` is safe to re-run
+as often as you like — it skips everything already done, so it is usually a
+minute.
+
+If you skip that step, `doctor.bat` will tell you which package is missing.
+
 ## The double-clickable scripts
 
 Everything can be run by double-clicking, so you never need a terminal:

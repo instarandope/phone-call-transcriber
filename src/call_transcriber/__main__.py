@@ -245,20 +245,35 @@ def _cmd_doctor(cfg) -> int:
         "" if sys.version_info >= (3, 11) else "3.11 or newer is required",
     )
 
+    # Updating the code can introduce a dependency the existing virtual
+    # environment does not have, and the failure then shows up much later as a
+    # feature that will not start. Checking here is what makes re-running
+    # install.bat the obvious fix.
     print("\nPackages")
-    for module, package in (
+    required = [
         ("numpy", "numpy"),
         ("sounddevice", "sounddevice"),
         ("soundfile", "soundfile"),
         ("webrtcvad", "webrtcvad-wheels"),
         ("faster_whisper", "faster-whisper"),
         ("requests", "requests"),
-    ):
+        ("pyperclip", "pyperclip"),
+    ]
+    if cfg.control.mode == "manual":
+        required.append(("pynput", "pynput"))
+
+    for module, package in required:
         try:
             __import__(module)
             check(package, True)
         except Exception as exc:
             check(package, False, f"{exc} -- re-run install.bat")
+
+    for module, package in (("pystray", "pystray"), ("PIL", "Pillow")):
+        try:
+            __import__(module)
+        except Exception:
+            print(f"  [--] {package} missing -- no tray icon, everything else works")
 
     print("\nAudio")
     try:
@@ -266,6 +281,17 @@ def _cmd_doctor(cfg) -> int:
         check(f"adapter found: {device}", True)
     except audio.AudioError as exc:
         check(f"adapter matching {cfg.audio.device_match!r}", False, str(exc))
+
+    print("\nControl")
+    if cfg.control.mode == "manual":
+        try:
+            from . import hotkey
+
+            check(f"hotkey {cfg.control.hotkey.upper()} -> {hotkey.to_pynput(cfg.control.hotkey)}", True)
+        except Exception as exc:
+            check(f"hotkey {cfg.control.hotkey!r}", False, str(exc))
+    else:
+        check("automatic call detection (nothing to press)", True)
 
     print("\nLocal model")
     reachable, detail = extract.check_server(cfg.extract)
