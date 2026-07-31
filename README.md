@@ -81,6 +81,44 @@ another one is not missed — see [Back-to-back calls](#back-to-back-calls).
 
 No graphics card is needed.
 
+## Wiring the adapter
+
+Get this right before touching any settings. A misconnected adapter produces
+symptoms that look exactly like software bugs.
+
+The LRX-40USB sits **in the middle of the handset connection**, not alongside
+it:
+
+```
+phone's handset jack ──cord──► LRX-40USB ◄──curly cord── handset
+                                   │
+                                  USB ──► PC
+```
+
+Per the manufacturer's instructions: plug your handset's curly cord into the
+LRX-40USB's modular jack, plug the LRX-40USB's own cord into the telephone,
+then the USB into the computer.
+
+**Use the handset jack — often labelled HAC — not the headset jack.** They look
+identical and both accept the plug. The headset jack is a separate circuit that
+is live under different conditions, and an adapter on it will hear the room
+while the phone is hung up.
+
+The adapter has two controls, and both matter:
+
+| Control | What it does |
+|---|---|
+| **Selector switch** | Matches the handset wiring configuration, which differs by phone brand. There is no way to know the right position from the outside — test both. |
+| **Record level dial** | Sets the level of *the calling party* specifically. Too low and the customer is faint in the transcript while your side is fine. Start at the midpoint. |
+
+The multi-colour LED is not documented beyond being a "mode indicator", so
+judge by the level meter rather than by the light.
+
+**Verify with `run.bat levels`.** With the handset on the cradle the meter
+should stay flat, even when you talk in the room. Lift the handset and it
+should jump on dial tone. Try both switch positions and keep the one that
+behaves that way. If neither does, the adapter is on the wrong jack.
+
 ## Setting it up
 
 Double-click **`install.bat`**. It creates the Python environment, installs
