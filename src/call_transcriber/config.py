@@ -16,7 +16,7 @@ from pathlib import Path
 
 @dataclass
 class AudioConfig:
-    device_match: str = "LRX"
+    device_match: str = "USB PnP"
     # -1 means "match by name". Set to a number from `run.bat devices` only
     # when several genuinely different devices share a name.
     device_index: int = -1
@@ -34,18 +34,23 @@ class DetectConfig:
     hangup_silence_s: float = 45.0
     min_call_s: float = 10.0
     max_call_s: float = 3600.0
-    noise_floor_dbfs: float = -50.0
+    noise_floor_dbfs: float = -48.0
     # The line going properly silent means the handset is back on the cradle.
-    line_dead_dbfs: float = -60.0
+    line_dead_dbfs: float = -59.0
     line_dead_s: float = 3.0
 
 
 @dataclass
 class TranscribeConfig:
-    model: str = "small.en"
+    model: str = "base.en"
     # Trade vocabulary, fed to whisper so it expects these words. Far more
     # effective on domain terms than moving to a larger model.
-    vocabulary: str = ""
+    vocabulary: str = (
+        "torsion spring, cables, rollers, tracks, panels, hoist, pulleys, "
+        "opener, operator, keypad, drum, bracket, weather seal, chain, rail, "
+        "trolley, jamb, header, Chamberlain, LiftMaster, Manaras, "
+        "Hanover Door Systems, Steinbach, Mitchell, Grunthal, Manitoba"
+    )
     device: str = "auto"
     compute_type: str = "int8"
     beam_size: int = 1
@@ -55,7 +60,7 @@ class TranscribeConfig:
 @dataclass
 class ExtractConfig:
     base_url: str = "http://127.0.0.1:11434"
-    model: str = "gemma3:4b"
+    model: str = "gemma4:e4b"
     # Reasoning models spend tokens thinking before answering. For filling in a
     # fixed schema from a transcript there is nothing to reason about, and on a
     # slow CPU it is minutes of pure cost.
@@ -66,7 +71,7 @@ class ExtractConfig:
     # An eleven-minute call takes a capable local model several minutes on an
     # older CPU. Processing is in the background, so a generous ceiling costs
     # nothing when things work and only matters when something is stuck.
-    timeout_s: int = 600
+    timeout_s: int = 900
 
 
 @dataclass
@@ -75,7 +80,7 @@ class ControlConfig:
     #           because recording without being asked is the worse mistake.
     # auto   -- the app decides when a call starts and stops
     mode: str = "manual"
-    hotkey: str = "ctrl+alt+r"
+    hotkey: str = "f9"
     beep: bool = True
 
 
@@ -90,12 +95,12 @@ class OutputConfig:
 
 @dataclass
 class BusinessConfig:
-    name: str = ""
+    name: str = "Hanover Doors Systems"
     # Comma-separated names of whoever answers the phone. Without this, an
     # unlabelled transcript gives the model no way to tell the person saying
     # "my name is X" from the customer, and it will take whichever name it saw.
-    staff: str = ""
-    default_service_area: str = ""
+    staff: str = "Johan, Derek"
+    default_service_area: str = "Steinbach or Mitchell"
 
 
 @dataclass

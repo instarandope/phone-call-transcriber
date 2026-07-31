@@ -252,6 +252,12 @@ choosing **Replace the files in the destination**. Your `.venv`, your
 `config.toml` and your `output` folder are not in the ZIP, so they survive
 untouched.
 
+**The shipped defaults are the working setup**, so a `config.toml` is optional
+— delete it and the app behaves identically, using the same values built into
+the code. That is the simplest way to pick up new settings after an update:
+delete `config.toml` and it stops being something you have to maintain. Keep
+one only for values you want different from the defaults.
+
 **Then double-click `install.bat` again.** New code sometimes needs a package
 your virtual environment does not have yet, and until it is installed the
 feature that needs it simply refuses to start. `install.bat` is safe to re-run

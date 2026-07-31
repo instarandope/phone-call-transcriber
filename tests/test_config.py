@@ -2,10 +2,29 @@ from call_transcriber import config
 
 
 def test_defaults_when_no_file(tmp_path):
+    """The shipped defaults are the working setup, so config.toml is optional."""
     cfg = config.load(tmp_path / "missing.toml", root=tmp_path)
-    assert cfg.transcribe.model == "small.en"
+
+    assert cfg.transcribe.model == "base.en"
+    assert cfg.extract.model == "gemma4:e4b"
+    assert cfg.control.mode == "manual"
+    assert cfg.control.hotkey == "f9"
+    assert cfg.audio.device_match == "USB PnP"
+    assert cfg.business.name
     assert cfg.output.keep_audio is False
     assert cfg.warnings == []
+
+
+def test_the_shipped_thresholds_are_internally_consistent(tmp_path):
+    """A dead-line threshold above the speech floor would chop every call."""
+    cfg = config.load(tmp_path / "missing.toml", root=tmp_path)
+    assert cfg.detect.line_dead_dbfs < cfg.detect.noise_floor_dbfs
+
+
+def test_the_shipped_vocabulary_covers_the_words_that_were_misheard(tmp_path):
+    vocabulary = config.load(tmp_path / "missing.toml", root=tmp_path).transcribe.vocabulary
+    for word in ("cables", "Manaras", "Grunthal", "torsion spring"):
+        assert word in vocabulary
 
 
 def test_values_are_read_and_coerced(tmp_path):
@@ -47,7 +66,7 @@ def test_unknown_section_is_reported(tmp_path):
 def test_broken_toml_falls_back_to_defaults(tmp_path):
     (tmp_path / "config.toml").write_text("[audio\nbroken", encoding="utf-8")
     cfg = config.load(root=tmp_path)
-    assert cfg.audio.device_match == "LRX"
+    assert cfg.audio.device_match == "USB PnP"
     assert any("not valid TOML" in w for w in cfg.warnings)
 
 

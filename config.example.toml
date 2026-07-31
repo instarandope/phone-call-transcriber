@@ -1,6 +1,14 @@
-# Copy this file to config.toml and edit. config.toml is gitignored.
-# Every setting below has a working default -- you only need to override
-# what is wrong for your machine.
+# Copy this file to config.toml and edit. config.toml is gitignored, so your
+# copy is never overwritten by an update.
+#
+# Every value below is already the working setup -- measured line thresholds,
+# the adapter's name, the models that tested best, the trade vocabulary. The
+# same values are also the built-in defaults, so if config.toml is missing or
+# deleted the app behaves identically. Nothing here has to be edited to work;
+# change something only when you want it different.
+#
+# The one thing to revisit if you take this to another phone or another room:
+# run `levels.bat` and update the two thresholds under [detect].
 
 [audio]
 # Substring matched (case-insensitive) against input device names to find the
@@ -49,7 +57,7 @@ speech_trigger_ms = 300
 # Below this level, the line counts as hung up. This is what normally ends a
 # call, and it should sit BELOW noise_floor_dbfs. Lower it if calls are ending
 # while someone is just thinking.
-line_dead_dbfs = -60.0
+line_dead_dbfs = -59.0
 
 # How long the line must stay dead before we act on it.
 line_dead_s = 3.0
@@ -61,7 +69,7 @@ hangup_silence_s = 45.0
 
 # Frames quieter than this are never treated as speech, regardless of what
 # the VAD says. Guards against line hiss triggering a recording.
-noise_floor_dbfs = -50.0
+noise_floor_dbfs = -48.0
 
 # Calls shorter than this are discarded as false triggers (line noise, a
 # handset knocked off the cradle, a wrong number).
@@ -93,7 +101,7 @@ mode = "manual"
 #
 # "pause" -- the Pause/Break key -- is worth considering if you want one key
 # you can hit without looking. Almost nothing else claims it.
-hotkey = "ctrl+alt+r"
+hotkey = "f9"
 
 # Two rising tones when recording starts, two falling when it stops -- so you
 # can confirm it armed without looking at the screen.
@@ -104,7 +112,7 @@ beep = true
 # faster-whisper model. Telephone audio is narrowband, so bigger is not always
 # better. small.en is the sweet spot on CPU; use distil-large-v3 on a GPU.
 #   tiny.en  base.en  small.en  medium.en  distil-large-v3
-model = "small.en"
+model = "base.en"
 
 # Words this trade actually uses, fed to whisper before it listens. It picks
 # between similar-sounding words partly on what it expects, so listing your
@@ -113,8 +121,7 @@ model = "small.en"
 # Put in the terms that get misheard: parts, brands, street names, your own
 # business name. Keep it under a couple of hundred words.
 #
-# vocabulary = "torsion spring, cables, rollers, tracks, panels, opener, keypad, weather seal, drum, bracket, Hanover Door Systems"
-vocabulary = ""
+vocabulary = "torsion spring, cables, rollers, tracks, panels, hoist, pulleys, opener, operator, keypad, drum, bracket, weather seal, chain, rail, trolley, jamb, header, Chamberlain, LiftMaster, Manaras, Hanover Door Systems, Steinbach, Mitchell, Grunthal, Manitoba"
 
 # auto | cpu | cuda
 device = "auto"
@@ -144,7 +151,7 @@ base_url = "http://127.0.0.1:11434"
 #   gemma3:1b   -- fastest, weakest at addresses
 #   gemma4:12b  -- more accurate, wants ~10 GB RAM and real patience on an
 #                  older CPU
-model = "gemma3:4b"
+model = "gemma4:e4b"
 
 # Reasoning models think before answering. Filling in a fixed schema from a
 # transcript needs no reasoning, and on a slow CPU it is minutes of pure cost.
@@ -169,7 +176,7 @@ chunk_chars = 12000
 # takes a capable model several minutes on an older CPU, and this all happens
 # in the background, so being generous costs nothing. Too low and a long call
 # produces a transcript with no work order attached.
-timeout_s = 600
+timeout_s = 900
 
 
 [output]
@@ -188,7 +195,7 @@ save_transcript = true
 [business]
 # Printed at the top of the work order, and told to the model so it never
 # mistakes your own business for the customer's details.
-name = ""
+name = "Hanover Doors Systems"
 
 # Whoever answers the phone, comma-separated. Worth filling in: the transcript
 # does not say who is speaking, so without this the model has no way to tell
@@ -200,9 +207,8 @@ name = ""
 # name with someone listed is still recorded as the customer. Listing everyone
 # who answers just makes it certain rather than inferred.
 #
-# staff = "Johan, Derek"
-staff = ""
+staff = "Johan, Derek"
 
 # Optional. Helps the model resolve partial addresses like "on Maple, here in
 # town" into something a tech can navigate to. Leave blank to disable.
-default_service_area = ""
+default_service_area = "Steinbach or Mitchell"
