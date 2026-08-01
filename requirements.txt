@@ -10,6 +10,11 @@ webrtcvad-wheels>=2.0.14
 # On-device speech-to-text
 faster-whisper>=1.0.3
 
+# The Parakeet speech engine and speaker labelling. Both are opt-in and need
+# their models downloading with `run.bat models`, but the library has to be
+# present for doctor to report on them.
+sherpa-onnx>=1.10.0
+
 # Local LLM extraction (Ollama HTTP API)
 requests>=2.31
 

@@ -395,14 +395,36 @@ def _cmd_doctor(cfg) -> int:
     reachable, detail = extract.check_server(cfg.extract)
     check(f"Ollama / {cfg.extract.model}", reachable, "" if reachable else detail)
 
-    print("\nSpeech model")
-    try:
-        from . import transcribe
+    # Loading each model for real is the point. Checking that a file exists
+    # would pass right up until the first call, which is the worst place to
+    # discover a half-finished install.
+    print("\nSpeech engine")
+    from . import transcribe
 
-        transcribe.load_model(cfg.transcribe)
-        check(f"whisper {cfg.transcribe.model} loads", True)
-    except Exception as exc:
-        check(f"whisper {cfg.transcribe.model}", False, str(exc))
+    if cfg.transcribe.engine == "parakeet":
+        try:
+            transcribe.load_parakeet(cfg.transcribe, cfg.root)
+            check("parakeet loads", True)
+        except Exception as exc:
+            check("parakeet", False, str(exc))
+    else:
+        try:
+            transcribe.load_model(cfg.transcribe)
+            check(f"whisper {cfg.transcribe.model} loads", True)
+        except Exception as exc:
+            check(f"whisper {cfg.transcribe.model}", False, str(exc))
+
+    print("\nSpeaker labelling")
+    if not cfg.diarize.enabled:
+        print("  [--] off -- transcripts will not say who is speaking")
+    else:
+        from . import diarize
+
+        try:
+            diarize.load(cfg.diarize, cfg.root)
+            check(f"diarization loads, expecting {cfg.diarize.speakers} speakers", True)
+        except Exception as exc:
+            check("diarization", False, str(exc))
 
     print("\nWhere the data goes")
     local = config.is_local(cfg.extract.base_url)

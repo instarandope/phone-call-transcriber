@@ -289,6 +289,9 @@ as often as you like — it skips everything already done, so it is usually a
 minute.
 
 If you skip that step, `doctor.bat` will tell you which package is missing.
+It loads whichever speech engine and speaker models you have configured, for
+real rather than just checking a file exists — so a half-finished install shows
+up there instead of on your first call.
 
 ## The double-clickable scripts
 
