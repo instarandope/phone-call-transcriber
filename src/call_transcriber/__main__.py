@@ -261,7 +261,7 @@ def _cmd_models(cfg, args) -> int:
             mark = "installed" if installed else "not installed"
             print(f"  [{mark:>13}]  {bundle.what}  (~{bundle.size_mb} MB)")
         print()
-        print("  run.bat models --parakeet    faster, more accurate speech engine")
+        print("  run.bat models --parakeet    more accurate speech engine, slower")
         print("  run.bat models --diarize     label who is speaking on each line")
         print("  run.bat models --all         both")
         return 0
@@ -747,29 +747,36 @@ def _cmd_compare(cfg, path: Path | None, models: str | None, engines: str | None
         print("error: give --models, --engines, or both")
         return 1
 
+    is_text = path.suffix.lower() in TEXT_SUFFIXES
+    if engine_specs and is_text:
+        print(
+            "error: --engines compares speech recognition, so it needs a "
+            "recording rather than a transcript.\n"
+            "  Set keep_audio = true under [output], take a call, and point "
+            "this at the call.wav."
+        )
+        return 1
+
     duration_s = None
-    if path.suffix.lower() in TEXT_SUFFIXES:
+    transcript_text = ""
+    if is_text:
         transcript_text = path.read_text(encoding="utf-8").strip()
         print(f"Read {len(transcript_text)} characters of transcript.\n")
     else:
         audio, rate = storage.read_wav(path)
-        print(f"Transcribing {path.name} once with {cfg.transcribe.model} ...")
+
+    if engine_specs:
+        # The engines each transcribe the whole recording below, so
+        # transcribing it once more up here would be the same work a third
+        # time -- it used to, on a seven minute call, for nothing.
+        transcript_text, duration_s = _compare_engines(cfg, audio, rate, engine_specs)
+    elif not is_text:
+        print(f"Transcribing {path.name} once with {_engine_label(cfg.transcribe)} ...")
         started = _time.monotonic()
         result = transcribe.transcribe(audio, rate, cfg.transcribe, cfg.audio.stereo_mode)
         transcript_text = result.text
         duration_s = result.duration_s
         print(f"  {_time.monotonic() - started:.0f}s, {len(result.segments)} segments\n")
-
-    if engine_specs:
-        if path.suffix.lower() in TEXT_SUFFIXES:
-            print(
-                "error: --engines compares speech recognition, so it needs a "
-                "recording rather than a transcript.\n"
-                "  Set keep_audio = true under [output], take a call, and point "
-                "this at the call.wav."
-            )
-            return 1
-        transcript_text = _compare_engines(cfg, audio, rate, engine_specs) or transcript_text
 
     if not transcript_text:
         print("That transcript is empty, so there is nothing to compare.")
@@ -814,24 +821,33 @@ def _cmd_compare(cfg, path: Path | None, models: str | None, engines: str | None
     return 0
 
 
-def _compare_engines(cfg, audio, rate: int, specs: list[str]) -> str:
+def _engine_label(settings) -> str:
+    """How an engine is named in output: parakeet, or whisper plus its size."""
+    engine = (getattr(settings, "engine", "whisper") or "whisper").lower()
+    return f"{engine}:{settings.model}" if engine == "whisper" else engine
+
+
+def _compare_engines(cfg, audio, rate: int, specs: list[str]) -> tuple[str, float | None]:
     """Transcribe the same recording with each engine and print both.
 
     Speed is only half the question. Read the transcripts: the one that gets
     the address, the part name and the phone number right is the one that
     matters, and that does not always follow the clock.
+
+    Returns the first engine's transcript, so that pairing --engines with
+    --models compares extraction against one fixed transcript rather than a
+    different one per model.
     """
     import time as _time
 
     from . import transcribe
 
     first = ""
+    duration_s = None
     timings = []
     for spec in specs:
         settings = _parse_engine(spec, cfg)
-        label = f"{settings.engine}" + (
-            f":{settings.model}" if settings.engine == "whisper" else ""
-        )
+        label = _engine_label(settings)
         print("=" * 72)
         print(f"  {label}")
         print("=" * 72)
@@ -851,7 +867,8 @@ def _compare_engines(cfg, audio, rate: int, specs: list[str]) -> str:
         print(f"\n  {elapsed:.0f}s for {result.duration_s:.0f}s of audio "
               f"({speed:.1f}x real time), {len(result.segments)} segments\n")
         timings.append((label, elapsed, speed, len(result.text)))
-        first = first or result.text
+        if not first:
+            first, duration_s = result.text, result.duration_s
 
     if len(timings) > 1:
         print("=" * 72)
@@ -863,7 +880,7 @@ def _compare_engines(cfg, audio, rate: int, specs: list[str]) -> str:
         print("  Read them, do not just compare the numbers. More characters is")
         print("  not better if the extra ones are wrong, and the engine that gets")
         print("  the address right wins however long it took.\n")
-    return first
+    return first, duration_s
 
 
 def fields_with_values(data: dict) -> list:

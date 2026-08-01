@@ -99,10 +99,13 @@ class EngineError(RuntimeError):
 def load_parakeet(cfg, root: Path):
     """Load (and memoize) the Parakeet recognizer.
 
-    Whisper decodes autoregressively, one token at a time, which is what makes
-    it slow on an old CPU. Parakeet is a transducer and does far less
-    sequential work, so it runs several times faster there while scoring better
-    on English -- and unlike whisper it does not invent sentences over silence.
+    Parakeet is a transducer rather than an autoregressive decoder, scores
+    better than whisper on English, and does not invent sentences over silence.
+
+    It is not, however, faster than a small whisper. Measured on a seven minute
+    call on an i5-4570: base.en 26s, parakeet 85s. Parakeet is 600M parameters
+    against base.en's 74M, and the "several times faster" figure that gets
+    quoted is against whisper small or large. It is chosen for accuracy.
     """
     global _parakeet, _parakeet_key
 
@@ -215,17 +218,28 @@ def transcribe(
 
 
 def _transcribe_turns(samples, sample_rate, cfg, turns, root) -> list[Segment]:
-    """One pass per speaker turn, so every line knows who said it."""
+    """One pass per speaker turn, so every line knows who said it.
+
+    The turns are widened to cover the silence between them first. Only what is
+    inside a turn ever reaches the speech engine, so every moment the diarizer
+    left unassigned is a moment nobody transcribes -- and the moments it misses
+    are the short quiet ones, which on a service call are the customer
+    confirming an address or agreeing to a time.
+    """
     from . import diarize as diarize_mod
 
-    merged = diarize_mod.merge_adjacent(turns)
+    merged = diarize_mod.close_gaps(
+        diarize_mod.merge_adjacent(turns), len(samples) / sample_rate
+    )
     names = diarize_mod.label(merged)
 
     out: list[Segment] = []
     for turn in merged:
         first = max(0, int(turn.start * sample_rate))
         last = min(len(samples), int(turn.end * sample_rate))
-        if last - first < sample_rate // 4:  # under 250 ms is not a sentence
+        # Only a guard against decoding a sliver of nothing. It used to sit at
+        # 250 ms, which is about the length of the word "yes".
+        if last - first < sample_rate // 20:  # 50 ms
             continue
         for segment in _run(samples[first:last], cfg, root):
             out.append(

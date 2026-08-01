@@ -113,12 +113,13 @@ beep = true
 [transcribe]
 # Which speech engine to use.
 #
-#   whisper  -- faster-whisper. Downloads its own weights, takes a vocabulary
-#               hint, and is slow on an old CPU because it decodes one token at
-#               a time.
-#   parakeet -- NVIDIA Parakeet TDT via sherpa-onnx. Several times faster on
-#               CPU, better English accuracy, and it does not invent sentences
-#               over silence the way whisper sometimes does.
+#   whisper  -- faster-whisper. Downloads its own weights and takes a
+#               vocabulary hint. base.en is quick even on an old CPU.
+#   parakeet -- NVIDIA Parakeet TDT via sherpa-onnx. Better English accuracy,
+#               and it does not invent sentences over silence the way whisper
+#               sometimes does -- but it is roughly three times slower than
+#               base.en, being eight times the model. Measured here: 26s
+#               against 85s on a seven minute call.
 #               Run `run.bat models --parakeet` first (~640 MB, one time).
 #
 # Compare them on a call of your own rather than taking anyone's word:

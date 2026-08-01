@@ -47,12 +47,12 @@ class DetectConfig:
 
 @dataclass
 class TranscribeConfig:
-    # whisper  -- faster-whisper. Fetches its own weights, biases well to a
-    #             vocabulary, slow on an old CPU because it decodes one token
-    #             at a time.
-    # parakeet -- NVIDIA Parakeet TDT via sherpa-onnx. Several times faster on
-    #             CPU, scores better on English, and does not hallucinate over
-    #             silence. Needs `run.bat models --parakeet` first.
+    # whisper  -- faster-whisper. Fetches its own weights, and biases well to
+    #             a vocabulary hint. base.en is quick even on an old CPU.
+    # parakeet -- NVIDIA Parakeet TDT via sherpa-onnx. Scores better on
+    #             English and does not hallucinate over silence, but is around
+    #             three times slower than base.en -- it is eight times the
+    #             model. Needs `run.bat models --parakeet` first.
     engine: str = "whisper"
     parakeet_dir: str = ""
     num_threads: int = 4

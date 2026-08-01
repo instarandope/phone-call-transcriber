@@ -134,6 +134,56 @@ def merge_adjacent(turns: list[Turn], gap_s: float = 0.4) -> list[Turn]:
     return merged
 
 
+def close_gaps(
+    turns: list[Turn],
+    duration: float,
+    bridge_s: float = 2.0,
+    reach_s: float = 1.0,
+) -> list[Turn]:
+    """Widen turns into the silence around them, so nothing goes untranscribed.
+
+    Only the audio inside a turn ever reaches the speech engine, which makes
+    every moment the diarizer failed to assign a moment nobody transcribes. The
+    losses are not random: a brief, quiet "yes", "correct", "it's a house" from
+    the far end of a phone line is the hardest thing for a detector to catch and
+    the easiest thing to leave out of a turn -- and it is also the answer that
+    confirms a field on the work order.
+
+    A gap shorter than `bridge_s` is therefore treated as boundary slop and
+    handed to the two turns either side of it, which meet in the middle.
+    Attribution in there is a coin toss, but a line credited to the wrong side
+    is worth a great deal more than a line that does not exist.
+
+    A longer gap is genuine dead air. Each side reaches `reach_s` into it --
+    enough to catch a word clipped at the edge -- and the remainder is left
+    alone rather than spending the time transcribing silence.
+    """
+    if not turns:
+        return []
+
+    edges = [[t.start, t.end, t.speaker] for t in turns]
+    for current, following in zip(edges, edges[1:]):
+        gap = following[0] - current[1]
+        if gap <= 0:
+            continue
+        if gap <= bridge_s:
+            current[1] = following[0] = current[1] + gap / 2
+        else:
+            current[1] += reach_s
+            following[0] -= reach_s
+
+    head, tail = edges[0], edges[-1]
+    head[0] = 0.0 if head[0] <= bridge_s else head[0] - reach_s
+    tail[1] = duration if duration - tail[1] <= bridge_s else tail[1] + reach_s
+
+    out = []
+    for start, end, speaker in edges:
+        start, end = max(0.0, start), min(duration, end)
+        if end > start:
+            out.append(Turn(start, end, speaker))
+    return out
+
+
 def label(turns: list[Turn]) -> dict[int, str]:
     """Name the speakers neutrally, in the order they first speak.
 

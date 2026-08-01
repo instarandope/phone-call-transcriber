@@ -513,7 +513,7 @@ trust.
 
 ```
 run.bat models              see what is installed
-run.bat models --parakeet   the faster, more accurate speech engine (~640 MB)
+run.bat models --parakeet   the more accurate speech engine, slower (~640 MB)
 run.bat models --diarize    speaker labelling (~44 MB)
 ```
 
@@ -532,11 +532,29 @@ run.bat models --parakeet --file "C:\path\to\the-file-you-downloaded.tar.bz2"
 engine = "parakeet"
 ```
 
-Whisper decodes one token at a time, which is exactly what an older CPU is bad
-at. Parakeet is a transducer, does far less sequential work, and independent
-benchmarks put it several times faster than Whisper small on CPU while scoring
-*better* on English. It also rarely invents text over silence, which phone
-calls are full of.
+Parakeet is a transducer rather than a token-by-token decoder, it scores better
+on English than Whisper does, and it rarely invents text over silence — which
+phone calls are full of.
+
+**It is not faster than `base.en`, despite what its reputation suggests.** On a
+7-minute call on an i5-4570, measured:
+
+| engine | time | vs real time |
+|---|---|---|
+| `whisper:base.en` | 26 s | 16.1× |
+| `parakeet` | 85 s | 4.9× |
+
+Parakeet is a 600-million-parameter model; `base.en` is 74 million. The
+"several times faster" claim you will read compares it against Whisper *small*
+or *large*, not against a tiny model. Choose it for accuracy and accept that it
+costs about three times as long — roughly five minutes on a 25-minute call,
+plus speaker labelling on top.
+
+What it buys you, on that same call: `eight Oakview Avenue` where `base.en`
+heard `AID Oak View Avenue`, `Chamberlain` where `base.en` heard `Chamber Lane`,
+and `I just want to fix before winter comes rolling around` where `base.en`
+produced `I just want to fix the first one to come to one around`. A house
+number is not a field you want a guess at.
 
 Test it against a call you already know the answer to:
 
@@ -547,6 +565,11 @@ run.bat compare somecall.wav --engines whisper:base.en,parakeet
 That prints both transcripts and both timings. **Read them rather than
 comparing the numbers** — the engine that gets the address and the part name
 right wins regardless of the clock.
+
+Parakeet recognises one utterance at a time, so a long call has to be cut up
+first. The cuts land in pauses, and every second of the recording ends up in
+exactly one piece — see `speech_windows` in `vad.py` for why that second part
+is load-bearing.
 
 ### Who said what
 

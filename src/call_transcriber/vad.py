@@ -359,27 +359,52 @@ def speech_windows(
     frame_ms: int = 20,
     aggressiveness: int = 2,
     max_window_s: float = 25.0,
-    join_gap_s: float = 0.6,
-    pad_s: float = 0.2,
+    min_silence_s: float = 0.4,
 ) -> list[tuple[float, float]]:
-    """Find the stretches of speech in a finished recording.
+    """Cut a finished recording into pieces Parakeet can take in one go.
 
     Whisper slices long audio up internally; Parakeet does not -- it recognises
-    one utterance, so a twenty-five minute call has to be cut somewhere. Cutting
-    on silence rather than on a clock keeps words intact.
+    one utterance, so a long call has to be cut somewhere.
+
+    **The windows returned are contiguous and cover the whole recording.** That
+    is the part that matters. An earlier version returned only the stretches
+    webrtcvad called speech and quietly dropped everything between them, which
+    on a real call lost the customer's short replies -- "it's a house", "that's
+    perfect", "nope", "yes, it is" -- because a brief, quiet answer from the far
+    end of a phone line is precisely what a voice detector is least certain
+    about. Those replies are the ones that confirm the fields on the work order,
+    so losing them is far worse than handing the engine some silence.
+
+    The detector therefore decides only *where* to cut, never *what* to keep.
 
     `samples` is float32 mono in [-1, 1]. Returns (start, end) in seconds.
     """
+    duration = len(samples) / sample_rate
+    step = int(sample_rate * frame_ms / 1000)
+    if duration <= max_window_s or step <= 0 or len(samples) < step:
+        return [(0.0, duration)]
+
+    voiced = _voiced_frames(samples, sample_rate, frame_ms, aggressiveness, step)
+
+    # An all-or-nothing guard, not a filter. A recording with no speech in it
+    # anywhere is worth skipping; a quiet moment *within* one is not.
+    if voiced and not any(voiced):
+        return []
+
+    cuts = _pauses(voiced, frame_ms, min_silence_s)
+    return _windows_between(cuts, duration, max_window_s, samples, sample_rate)
+
+
+def _voiced_frames(
+    samples: np.ndarray, sample_rate: int, frame_ms: int, aggressiveness: int, step: int
+) -> list[bool]:
+    """Which 20 ms frames webrtcvad thinks contain speech. [] if it is absent."""
     try:
         import webrtcvad
     except ImportError:  # pragma: no cover - install-time problem
-        return [(0.0, len(samples) / sample_rate)]
+        return []
 
     detector = webrtcvad.Vad(aggressiveness)
-    step = int(sample_rate * frame_ms / 1000)
-    if step <= 0 or len(samples) < step:
-        return [(0.0, len(samples) / sample_rate)]
-
     voiced: list[bool] = []
     for start in range(0, len(samples) - step + 1, step):
         frame = samples[start : start + step]
@@ -388,52 +413,80 @@ def speech_windows(
             voiced.append(detector.is_speech(pcm, sample_rate))
         except Exception:
             voiced.append(False)
+    return voiced
 
-    windows: list[list[float]] = []
-    gap_frames = max(1, round(join_gap_s * 1000 / frame_ms))
-    quiet = 0
+
+def _pauses(voiced: list[bool], frame_ms: int, min_silence_s: float) -> list[float]:
+    """The midpoint of every silence long enough to be worth cutting at."""
+    needed = max(1, round(min_silence_s * 1000 / frame_ms))
+    out: list[float] = []
+    run = 0
     for index, is_speech in enumerate(voiced):
-        at = index * frame_ms / 1000
         if is_speech:
-            # A short gap inside a sentence should not become a cut.
-            if windows and quiet <= gap_frames:
-                windows[-1][1] = at + frame_ms / 1000
-            else:
-                windows.append([at, at + frame_ms / 1000])
-            quiet = 0
+            if run >= needed:
+                out.append((index - run / 2) * frame_ms / 1000)
+            run = 0
         else:
-            quiet += 1
-
-    if not windows:
-        return []
-
-    duration = len(samples) / sample_rate
-    padded = [
-        (max(0.0, start - pad_s), min(duration, end + pad_s)) for start, end in windows
-    ]
-
-    # Padding can push neighbouring windows into each other. Left overlapping,
-    # the same words get transcribed twice and appear twice in the transcript.
-    joined: list[tuple[float, float]] = []
-    for start, end in padded:
-        if joined and start <= joined[-1][1]:
-            joined[-1] = (joined[-1][0], max(joined[-1][1], end))
-        else:
-            joined.append((start, end))
-
-    return _cap_length(joined, max_window_s)
-
-
-def _cap_length(windows: list[tuple[float, float]], limit: float) -> list[tuple[float, float]]:
-    """Split anything longer than the limit, for someone who never pauses."""
-    out: list[tuple[float, float]] = []
-    for start, end in windows:
-        while end - start > limit:
-            out.append((start, start + limit))
-            start += limit
-        if end > start:
-            out.append((start, end))
+            run += 1
+    if run >= needed:
+        out.append((len(voiced) - run / 2) * frame_ms / 1000)
     return out
+
+
+def _windows_between(
+    cuts: list[float],
+    duration: float,
+    limit: float,
+    samples: np.ndarray,
+    sample_rate: int,
+) -> list[tuple[float, float]]:
+    """Contiguous windows, each no longer than the limit, split at the pauses."""
+    bounds = [0.0]
+    index = 0
+    while duration - bounds[-1] > limit:
+        ceiling = bounds[-1] + limit
+        latest = None
+        while index < len(cuts) and cuts[index] <= ceiling:
+            if cuts[index] > bounds[-1]:
+                latest = cuts[index]
+            index += 1
+
+        # Nobody drew breath for a whole window. Cut at the quietest instant
+        # near the limit rather than exactly on it -- landing mid-vowel is what
+        # turned "basically" into "...a trolley based" / "Basically, closer to
+        # the ceiling" on a real call.
+        if latest is None:
+            latest = _quietest(samples, sample_rate, bounds[-1], ceiling)
+        bounds.append(latest)
+
+    bounds.append(duration)
+    return list(zip(bounds, bounds[1:]))
+
+
+def _quietest(
+    samples: np.ndarray,
+    sample_rate: int,
+    start: float,
+    end: float,
+    tail: float = 0.25,
+    block_ms: int = 20,
+) -> float:
+    """The quietest moment in the last stretch before `end`.
+
+    Searching only the tail keeps windows close to the limit; searching at all
+    is what stops the cut landing in the middle of a word.
+    """
+    from_time = end - (end - start) * tail
+    first = int(from_time * sample_rate)
+    last = min(len(samples), int(end * sample_rate))
+    block = max(1, int(sample_rate * block_ms / 1000))
+    if last - first < block * 2:
+        return end
+
+    usable = (last - first) // block * block
+    blocks = samples[first : first + usable].reshape(-1, block)
+    quietest = int(np.argmin(np.abs(blocks).mean(axis=1)))
+    return (first + (quietest + 0.5) * block) / sample_rate
 
 
 def _as_int16(frame: np.ndarray) -> np.ndarray:
