@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_devices()
     if args.command == "doctor":
         return _cmd_doctor(cfg)
+    if args.command == "config":
+        return _cmd_config(cfg, args.create, args.value)
     if args.command == "prompt":
         return _cmd_prompt(cfg)
     if args.command == "last":
@@ -70,6 +72,19 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("devices", help="list audio input devices")
     sub.add_parser("doctor", help="check the setup")
+    settings = sub.add_parser(
+        "config", help="show which config.toml is in use and what it changed"
+    )
+    settings.add_argument(
+        "--create",
+        action="store_true",
+        help="create config.toml if absent, reusing a previous install's settings",
+    )
+    settings.add_argument(
+        "--value",
+        metavar="SECTION.KEY",
+        help="print one setting and nothing else, e.g. extract.model",
+    )
     sub.add_parser("prompt", help="show exactly what the model is told to extract")
     sub.add_parser("last", help="reprint the most recent work order")
     fetch = sub.add_parser("models", help="download the optional speech models")
@@ -325,6 +340,69 @@ def _cmd_prompt(cfg) -> int:
     return 0
 
 
+def _cmd_config(cfg, create: bool, value: str | None = None) -> int:
+    """Where the settings came from, and which of them are not the default.
+
+    The question this answers is "I edited config.toml and nothing changed".
+    There are only two possible reasons -- the file being read is not the file
+    that was edited, or the edit did not parse -- and both are visible here.
+    """
+    if value:
+        # install.bat needs a setting or two before it can carry on. It used to
+        # pick them out of the file with findstr, which cannot tell one
+        # section's `model` from another's and quietly returned whichever came
+        # last. Asking the loader is the only way to get the same answer the
+        # program will act on.
+        section, _, key = value.partition(".")
+        table = getattr(cfg, section, None)
+        if not hasattr(table, "__dataclass_fields__") or not key or not hasattr(table, key):
+            print(f"error: no such setting: {value}", file=sys.stderr)
+            return 1
+        found = getattr(table, key)
+        # Booleans print the way you would write them in the file, not the way
+        # Python spells them, so a batch script comparing against "true" and a
+        # person reading config.toml agree.
+        print(str(found).lower() if isinstance(found, bool) else found)
+        return 0
+
+    if create:
+        try:
+            what, source = config.adopt_or_create(cfg.root)
+        except (OSError, RuntimeError) as exc:
+            print(f"  [XX] could not create config.toml: {exc}")
+            return 1
+
+        if what == "kept":
+            print("  [ok] config.toml already exists (left alone)")
+        elif what == "adopted":
+            print(f"  [ok] Brought your settings across from {source}")
+            print("       Delete config.toml and re-run install.bat to start fresh.")
+        else:
+            print("  [ok] Created config.toml from the example")
+        cfg = config.load(root=cfg.root)
+
+    if cfg.path is None:
+        print(f"No {config.CONFIG_NAME} in {cfg.root}")
+        print("Every setting below is a built-in default.\n")
+    else:
+        print(f"Reading {cfg.path}\n")
+
+    changed = config.differences(cfg)
+    if not changed:
+        print("Nothing differs from the built-in defaults.")
+    else:
+        print("Changed from the defaults:")
+        for setting, current in changed:
+            rendered = str(current)
+            if len(rendered) > 60:
+                rendered = rendered[:57] + "..."
+            print(f"  {setting} = {rendered}")
+
+    for warning in cfg.warnings:
+        print(f"\n  [!!] {warning}")
+    return 0
+
+
 def _cmd_doctor(cfg) -> int:
     from . import audio, extract
 
@@ -336,7 +414,20 @@ def _cmd_doctor(cfg) -> int:
         ok = ok and passed
 
     print(f"call-transcriber {__version__}\n")
-    print("Python")
+
+    # First, because it frames everything below it. Downloading the project
+    # again gives you a folder with no config.toml, the defaults silently take
+    # over, and every check still passes -- while running a setup nobody chose.
+    print("Settings")
+    if cfg.path is not None:
+        check(f"reading {cfg.path}", True)
+    else:
+        print(f"  [--] no {config.CONFIG_NAME} here -- built-in defaults in use")
+        print(f"       Expected it at {cfg.root / config.CONFIG_NAME}")
+        print("       If you edited a config.toml, that was not this one.")
+        print("       Run install.bat to create it here.")
+
+    print("\nPython")
     check(
         f"version {sys.version_info.major}.{sys.version_info.minor}",
         sys.version_info >= (3, 11),
@@ -359,6 +450,10 @@ def _cmd_doctor(cfg) -> int:
     ]
     if cfg.control.mode == "manual":
         required.append(("pynput", "pynput"))
+    # Only when something actually uses it. Reporting it unconditionally would
+    # put a red mark next to a setup that works perfectly well without it.
+    if cfg.transcribe.engine == "parakeet" or cfg.diarize.enabled:
+        required.append(("sherpa_onnx", "sherpa-onnx"))
 
     for module, package in required:
         try:
@@ -417,6 +512,7 @@ def _cmd_doctor(cfg) -> int:
     print("\nSpeaker labelling")
     if not cfg.diarize.enabled:
         print("  [--] off -- transcripts will not say who is speaking")
+        print("       Set diarize.enabled = true in config.toml to turn it on.")
     else:
         from . import diarize
 

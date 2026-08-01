@@ -276,11 +276,24 @@ choosing **Replace the files in the destination**. Your `.venv`, your
 `config.toml` and your `output` folder are not in the ZIP, so they survive
 untouched.
 
+If you extract to a **new** folder instead — which is what Windows does by
+default, leaving you with `phone-call-transcriber-main (1)` next to the old one
+— that new folder has no settings in it at all, because `config.toml` is not
+part of the download. `install.bat` handles this: it looks in the neighbouring
+folders for the install this one replaces and brings its `config.toml` across,
+saying so when it does. Double-click **`config.bat`** afterwards to confirm
+what came over.
+
 **The shipped defaults are the working setup**, so a `config.toml` is optional
 — delete it and the app behaves identically, using the same values built into
 the code. That is the simplest way to pick up new settings after an update:
 delete `config.toml` and it stops being something you have to maintain. Keep
 one only for values you want different from the defaults.
+
+`doctor.bat` names the file it read at the top of its output, and says outright
+when there wasn't one. Worth a glance after any update: a missing `config.toml`
+and a `config.toml` that agrees with the defaults produce exactly the same
+settings, and only one of them means the change you just made is being ignored.
 
 **Then double-click `install.bat` again.** New code sometimes needs a package
 your virtual environment does not have yet, and until it is installed the
@@ -305,6 +318,7 @@ Everything can be run by double-clicking, so you never need a terminal:
 | **`devices.bat`** | List audio inputs, to find the adapter's name for `config.toml`. |
 | **`doctor.bat`** | Check everything: packages, adapter, models, output folder. |
 | **`levels.bat`** | Meter the phone line and print the threshold values to use. |
+| **`config.bat`** | Which `config.toml` is in use, and which settings are actually in effect. |
 | **`prompt.bat`** | Show exactly what the model is told to extract from a call. |
 | **`last.bat`** | Bring back the most recent work order and re-copy it. |
 
@@ -663,6 +677,13 @@ change:
 
 Start with `doctor.bat`. It checks each piece and says what to do about
 anything broken. Beyond that:
+
+**I changed a setting and nothing happened** — double-click `config.bat`. It
+prints the file it is reading and every setting that differs from the default.
+If your change is not in that list, it never reached the program: either the
+`config.toml` you edited is in a different folder from the one you are running
+(easy after an update — check the path `config.bat` prints), or the file has a
+syntax error, which it will tell you about.
 
 **No device matching 'LRX'** — the adapter reports itself under a generic name
 on many machines. Double-click `devices.bat` and copy part of whatever you actually

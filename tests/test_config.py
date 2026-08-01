@@ -157,3 +157,137 @@ def test_pointing_extraction_off_the_machine_is_called_out(tmp_path):
 
 def test_the_shipped_default_stays_on_this_machine(tmp_path):
     assert config.is_local(config.load(tmp_path / "none.toml", root=tmp_path).extract.base_url)
+
+
+# ---------------------------------------------------------------------------
+# Knowing which file the settings came from.
+#
+# A download of this project never contains config.toml, so updating by
+# unzipping it again produces a folder with no settings. The defaults then take
+# over, every check still passes, and the transcriber runs a setup nobody
+# chose. That happened, so these are the guards against it happening quietly.
+# ---------------------------------------------------------------------------
+
+
+def test_no_config_file_is_visible_as_such(tmp_path):
+    assert config.load(root=tmp_path).path is None
+
+
+def test_the_file_actually_read_is_recorded(tmp_path):
+    (tmp_path / "config.toml").write_text("[transcribe]\nengine = \"parakeet\"\n")
+    cfg = config.load(root=tmp_path)
+
+    assert cfg.path == tmp_path / "config.toml"
+    assert cfg.transcribe.engine == "parakeet"
+
+
+def test_an_unreadable_file_does_not_claim_to_have_been_read(tmp_path):
+    """Falling back to defaults after a parse error is fine. Saying the file
+    was used when it was not is what makes the failure invisible."""
+    (tmp_path / "config.toml").write_text("[transcribe\nengine =")
+    cfg = config.load(root=tmp_path)
+
+    assert cfg.path is None
+    assert cfg.warnings
+
+
+def test_differences_lists_only_what_was_changed(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[transcribe]\nengine = \"parakeet\"\n\n[diarize]\nenabled = true\n"
+    )
+    changed = dict(config.differences(config.load(root=tmp_path)))
+
+    assert changed == {"transcribe.engine": "parakeet", "diarize.enabled": True}
+
+
+def test_a_default_config_differs_in_nothing(tmp_path):
+    assert config.differences(config.load(root=tmp_path)) == []
+
+
+def _install(folder):
+    (folder / "src" / "call_transcriber").mkdir(parents=True)
+    (folder / "src" / "call_transcriber" / "config.py").write_text("")
+    (folder / "config.example.toml").write_text("[transcribe]\nengine = \"whisper\"\n")
+    return folder
+
+
+def test_settings_are_carried_over_from_the_install_being_replaced(tmp_path):
+    old = _install(tmp_path / "phone-call-transcriber-main")
+    (old / "config.toml").write_text("[transcribe]\nengine = \"parakeet\"\n")
+    new = _install(tmp_path / "phone-call-transcriber-main (1)")
+
+    what, source = config.adopt_or_create(new)
+
+    assert what == "adopted"
+    assert source == old / "config.toml"
+    assert config.load(root=new).transcribe.engine == "parakeet"
+
+
+def test_the_most_recently_touched_install_is_the_one_copied(tmp_path):
+    stale = _install(tmp_path / "old")
+    (stale / "config.toml").write_text("[transcribe]\nmodel = \"tiny.en\"\n")
+    recent = _install(tmp_path / "newer")
+    (recent / "config.toml").write_text("[transcribe]\nmodel = \"small.en\"\n")
+    import os
+
+    os.utime(stale / "config.toml", (1, 1))
+    os.utime(recent / "config.toml", (2, 2))
+
+    _, source = config.adopt_or_create(_install(tmp_path / "target"))
+
+    assert source == recent / "config.toml"
+
+
+def test_an_unrelated_neighbour_is_not_mistaken_for_a_previous_install(tmp_path):
+    stranger = tmp_path / "some other project"
+    stranger.mkdir()
+    (stranger / "config.toml").write_text("[transcribe]\nmodel = \"tiny.en\"\n")
+
+    what, _ = config.adopt_or_create(_install(tmp_path / "target"))
+
+    assert what == "created"
+
+
+def test_an_existing_config_is_never_overwritten(tmp_path):
+    old = _install(tmp_path / "previous")
+    (old / "config.toml").write_text("[transcribe]\nmodel = \"tiny.en\"\n")
+    current = _install(tmp_path / "current")
+    (current / "config.toml").write_text("[transcribe]\nmodel = \"small.en\"\n")
+
+    what, _ = config.adopt_or_create(current)
+
+    assert what == "kept"
+    assert config.load(root=current).transcribe.model == "small.en"
+
+
+# ---------------------------------------------------------------------------
+# `config --value`, which install.bat reads settings through.
+# ---------------------------------------------------------------------------
+
+
+def test_one_setting_prints_alone(tmp_path, capsys):
+    from call_transcriber import __main__ as cli
+
+    (tmp_path / "config.toml").write_text('[extract]\nmodel = "gemma4:e4b"\n')
+    assert cli._cmd_config(config.load(root=tmp_path), False, "extract.model") == 0
+    assert capsys.readouterr().out == "gemma4:e4b\n"
+
+
+def test_booleans_print_as_the_config_file_spells_them(tmp_path, capsys):
+    """install.bat compares against "true"; Python would say "True"."""
+    from call_transcriber import __main__ as cli
+
+    (tmp_path / "config.toml").write_text("[diarize]\nenabled = true\n")
+    cli._cmd_config(config.load(root=tmp_path), False, "diarize.enabled")
+    assert capsys.readouterr().out == "true\n"
+
+
+def test_asking_for_a_setting_that_does_not_exist_fails_loudly(tmp_path, capsys):
+    from call_transcriber import __main__ as cli
+
+    cfg = config.load(root=tmp_path)
+    for asked in ("nonsense", "extract.nonsense", "nonsense.model", "root.parent"):
+        assert cli._cmd_config(cfg, False, asked) == 1, asked
+        captured = capsys.readouterr()
+        assert captured.out == "", asked
+        assert "no such setting" in captured.err

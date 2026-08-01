@@ -108,11 +108,17 @@ if errorlevel 1 (
 )
 
 REM --------------------------------------------------------------- config ---
-if not exist "config.toml" (
-    copy /y "config.example.toml" "config.toml" >nul
-    echo  [ok] Created config.toml
-) else (
-    echo  [ok] config.toml already exists ^(left alone^)
+REM config.toml is not part of the download -- it holds business details, so it
+REM is deliberately kept out of the repository. The consequence is that
+REM updating by unzipping the project again produces a folder with no settings
+REM at all, and until this started looking next door for the install it
+REM replaces, the defaults quietly took over with nothing said.
+set PYTHONPATH=%~dp0src
+"%VENV_PY%" -m call_transcriber config --create
+if errorlevel 1 (
+    echo  [XX] Could not prepare config.toml. Scroll up for the reason.
+    pause
+    exit /b 1
 )
 
 REM --------------------------------------------------------------- Ollama ---
@@ -130,8 +136,21 @@ if errorlevel 1 (
 )
 echo  [ok] Ollama is installed
 
-for /f "tokens=2 delims== " %%m in ('findstr /b "model" config.toml') do set OLLAMA_MODEL=%%~m
-if not defined OLLAMA_MODEL set OLLAMA_MODEL=gemma3:4b
+REM Ask the loader rather than reading the file. Both [transcribe] and [extract]
+REM have a `model` key, and findstr cannot tell them apart -- it returned
+REM whichever happened to come last in the file.
+REM %VENV_PY% is deliberately unquoted here. It is a relative path with no
+REM spaces in it, and `cmd /c` -- which is what for /f runs the command through
+REM -- mangles a command whose first token is quoted. The folder above this one
+REM may well have a space in its name; that is fine, it is the working
+REM directory rather than part of this string.
+set OLLAMA_MODEL=
+for /f "delims=" %%m in ('%VENV_PY% -m call_transcriber config --value extract.model') do set OLLAMA_MODEL=%%m
+if not defined OLLAMA_MODEL (
+    echo  [XX] Could not read extract.model from config.toml.
+    pause
+    exit /b 1
+)
 
 echo  [..] Downloading the language model ^(%OLLAMA_MODEL%, a few GB^)
 ollama pull %OLLAMA_MODEL%
@@ -144,13 +163,37 @@ if errorlevel 1 (
 echo  [ok] Language model ready
 
 REM -------------------------------------------------------- speech model ----
-echo  [..] Downloading the speech model
-set PYTHONPATH=%~dp0src
-"%VENV_PY%" -c "from call_transcriber import config, transcribe; transcribe.load_model(config.load().transcribe)"
+REM Fetch what the settings actually ask for. Downloading the whisper weights
+REM regardless used to leave anyone who had chosen parakeet with an install
+REM that looked finished and then failed on their first real call.
+set ENGINE=
+for /f "delims=" %%e in ('%VENV_PY% -m call_transcriber config --value transcribe.engine') do set ENGINE=%%e
+
+echo  [..] Downloading the speech model ^(%ENGINE%^)
+if /i "%ENGINE%"=="parakeet" (
+    "%VENV_PY%" -m call_transcriber models --parakeet
+) else (
+    "%VENV_PY%" -c "from call_transcriber import config, transcribe; transcribe.load_model(config.load().transcribe)"
+)
 if errorlevel 1 (
     echo  [!!] The speech model did not download. It will retry on first run.
 ) else (
     echo  [ok] Speech model ready
+)
+
+REM ---------------------------------------------------- speaker labelling ---
+set DIARIZE=
+for /f "delims=" %%d in ('%VENV_PY% -m call_transcriber config --value diarize.enabled') do set DIARIZE=%%d
+
+if /i "%DIARIZE%"=="true" (
+    echo  [..] Downloading the speaker labelling models
+    "%VENV_PY%" -m call_transcriber models --diarize
+    if errorlevel 1 (
+        echo  [!!] The speaker models did not download. Speaker labelling will
+        echo       not work until they do: run.bat models --diarize
+    ) else (
+        echo  [ok] Speaker labelling ready
+    )
 )
 
 REM ------------------------------------------------------------- autostart --
@@ -180,6 +223,7 @@ echo   Next - all of these are double-clickable, no typing needed:
 echo     devices.bat        - find your adapter's name for config.toml
 echo     doctor.bat         - check everything is ready
 echo     levels.bat         - meter your phone line, get the threshold values
+echo     config.bat         - which settings are actually in effect
 echo.
 echo   Then start it:
 echo     start-hidden.vbs   - background, tray icon only, nothing in the taskbar

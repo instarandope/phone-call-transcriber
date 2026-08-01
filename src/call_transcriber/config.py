@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import ipaddress
+import shutil
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -145,6 +146,12 @@ class Config:
 
     root: Path = field(default_factory=Path.cwd)
     warnings: list[str] = field(default_factory=list)
+    # The file the settings actually came from, or None when there was none to
+    # read and every value below is a built-in default. Worth recording: a
+    # missing config file and a config file that happens to agree with the
+    # defaults produce identical settings, and only one of them means the edit
+    # you just made is being ignored.
+    path: Path | None = None
 
     @property
     def output_dir(self) -> Path:
@@ -188,9 +195,11 @@ def load(path: Path | None = None, root: Path | None = None) -> Config:
 
     warnings: list[str] = []
     data: dict = {}
+    read_from: Path | None = None
     if path.exists():
         try:
             data = tomllib.loads(path.read_text(encoding="utf-8"))
+            read_from = path
         except tomllib.TOMLDecodeError as exc:
             warnings.append(f"{path.name} is not valid TOML ({exc}) -- using defaults")
         except OSError as exc:
@@ -217,8 +226,91 @@ def load(path: Path | None = None, root: Path | None = None) -> Config:
         },
         root=root,
         warnings=warnings,
+        path=read_from,
     )
     return _validate(cfg)
+
+
+CONFIG_NAME = "config.toml"
+EXAMPLE_NAME = "config.example.toml"
+
+
+def differences(cfg: Config) -> list[tuple[str, object]]:
+    """Settings that are not the built-in default, as dotted key/value pairs.
+
+    This is the answer to "I changed something and nothing happened". Either
+    the change is in this list or it never reached the program.
+    """
+    stock = Config()
+    out: list[tuple[str, object]] = []
+    for section in dataclasses.fields(Config):
+        mine = getattr(cfg, section.name)
+        # root/warnings/path are bookkeeping, not settings. `field.type` is a
+        # string here because of `from __future__ import annotations`, so ask
+        # the value rather than the annotation.
+        if not dataclasses.is_dataclass(mine):
+            continue
+        theirs = getattr(stock, section.name)
+        for entry in dataclasses.fields(mine):
+            value = getattr(mine, entry.name)
+            if value != getattr(theirs, entry.name):
+                out.append((f"{section.name}.{entry.name}", value))
+    return out
+
+
+def _looks_like_install(folder: Path) -> bool:
+    return (folder / "src" / "call_transcriber" / "config.py").exists()
+
+
+def adopt_or_create(root: Path) -> tuple[str, Path | None]:
+    """Make sure root/config.toml exists, carrying settings over if it can.
+
+    config.toml is deliberately not in the repository -- it holds business
+    details and machine paths, and those are nobody else's business. The
+    side effect is that updating the program by downloading it again lands in
+    a folder with no settings at all, whereupon the defaults quietly take over
+    and the next call runs with a different engine than the one that was
+    chosen. Nothing about that is visible until you go looking.
+
+    So when this folder has no settings, look next door for the install this
+    one replaces and bring its settings across.
+
+    Returns (what happened, where they came from).
+    """
+    destination = root / CONFIG_NAME
+    if destination.exists():
+        return "kept", destination
+
+    previous = _previous_config(root)
+    if previous is not None:
+        shutil.copyfile(previous, destination)
+        return "adopted", previous
+
+    example = root / EXAMPLE_NAME
+    if not example.exists():
+        raise RuntimeError(f"{example} is missing -- the download is incomplete")
+    shutil.copyfile(example, destination)
+    return "created", example
+
+
+def _previous_config(root: Path) -> Path | None:
+    """The config.toml of the most recently used other install, if there is one."""
+    try:
+        siblings = sorted(root.parent.iterdir())
+    except OSError:
+        return None
+
+    candidates = []
+    for folder in siblings:
+        if folder == root or not folder.is_dir() or not _looks_like_install(folder):
+            continue
+        config_file = folder / CONFIG_NAME
+        if config_file.exists():
+            candidates.append(config_file)
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
 LOOPBACK_NAMES = {"localhost", "ip6-localhost", "ip6-loopback"}
