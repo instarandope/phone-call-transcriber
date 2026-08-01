@@ -14,9 +14,10 @@ import logging
 import shutil
 import tarfile
 import tempfile
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -72,19 +73,31 @@ BY_KEY = {b.key: b for b in BUNDLES}
 DIARIZATION_KEYS = ("segmentation", "embedding")
 
 
-def install(bundle: Bundle, root: Path, force: bool = False) -> Path:
-    """Fetch and unpack one bundle. Returns the folder it lives in."""
+def install(
+    bundle: Bundle, root: Path, force: bool = False, archive: Path | None = None
+) -> Path:
+    """Fetch and unpack one bundle. Returns the folder it lives in.
+
+    `archive` installs from a file already on disk instead of downloading,
+    which is the way through a network that intercepts TLS or blocks GitHub.
+    """
     target = bundle.target(root)
-    if bundle.installed(root) and not force:
+    if bundle.installed(root) and not force and archive is None:
         log.info("%s is already installed", bundle.what)
         return target
 
     target.mkdir(parents=True, exist_ok=True)
-    log.info("downloading %s (~%d MB)", bundle.what, bundle.size_mb)
 
     with tempfile.TemporaryDirectory() as tmp:
-        download = Path(tmp) / Path(bundle.url).name
-        _fetch(bundle.url, download)
+        if archive is not None:
+            if not archive.exists():
+                raise RuntimeError(f"{archive} does not exist")
+            log.info("installing %s from %s", bundle.what, archive)
+            download = archive
+        else:
+            log.info("downloading %s (~%d MB)", bundle.what, bundle.size_mb)
+            download = Path(tmp) / Path(bundle.url).name
+            _fetch(bundle.url, download, bundle)
 
         if download.suffix == ".onnx":
             shutil.copy2(download, target / download.name)
@@ -100,23 +113,47 @@ def install(bundle: Bundle, root: Path, force: bool = False) -> Path:
     return target
 
 
-def _fetch(url: str, destination: Path) -> None:
-    with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
-        total = int(response.headers.get("Content-Length") or 0)
-        done = 0
-        step = max(1, total // 20) if total else 0
-        next_mark = step
+def _fetch(url: str, destination: Path, bundle: Bundle) -> None:
+    """Download with requests, which carries its own CA bundle.
 
-        with open(destination, "wb") as handle:
-            while True:
-                chunk = response.read(1 << 20)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                done += len(chunk)
-                if step and done >= next_mark:
-                    print(f"    {done / 1_048_576:6.0f} MB of {total / 1_048_576:.0f}")
-                    next_mark += step
+    urllib defers to the operating system's certificate store, and on Windows
+    that frequently lacks the chain these hosts present -- the download then
+    fails with CERTIFICATE_VERIFY_FAILED even though nothing is wrong.
+    requests ships certifi and does not have that problem.
+    """
+    try:
+        with requests.get(url, stream=True, timeout=(30, 300)) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            step = max(1, total // 20) if total else 0
+            next_mark = step
+
+            with open(destination, "wb") as handle:
+                for chunk in response.iter_content(1 << 20):
+                    handle.write(chunk)
+                    done += len(chunk)
+                    if step and done >= next_mark:
+                        print(f"    {done / 1_048_576:6.0f} MB of {total / 1_048_576:.0f}")
+                        next_mark += step
+    except requests.exceptions.SSLError as exc:
+        raise RuntimeError(_manual_instructions(bundle, f"the TLS handshake failed ({exc})")) from exc
+    except requests.RequestException as exc:
+        raise RuntimeError(_manual_instructions(bundle, str(exc))) from exc
+
+
+def _manual_instructions(bundle: Bundle, reason: str) -> str:
+    """When the download cannot be made to work, say how to do it by hand."""
+    return (
+        f"{reason}\n\n"
+        f"  This is the download failing, not the model being unavailable. A\n"
+        f"  company network that inspects HTTPS traffic will do this.\n\n"
+        f"  To do it by hand instead:\n"
+        f"    1. Open this in a browser and save the file:\n"
+        f"         {bundle.url}\n"
+        f"    2. Then run, with the path to what you downloaded:\n"
+        f"         run.bat models --{bundle.key} --file \"C:\\path\\to\\{Path(bundle.url).name}\""
+    )
 
 
 def _unpack(archive: Path, target: Path) -> None:

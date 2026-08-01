@@ -77,6 +77,11 @@ def _parser() -> argparse.ArgumentParser:
     fetch.add_argument("--diarize", action="store_true", help="speaker labelling models")
     fetch.add_argument("--all", action="store_true", dest="all_models", help="both")
     fetch.add_argument("--force", action="store_true", help="re-download even if present")
+    fetch.add_argument(
+        "--file",
+        dest="archive",
+        help="install from a file you downloaded yourself, instead of fetching it",
+    )
     levels = sub.add_parser("levels", help="measure your line and suggest thresholds")
     levels.add_argument(
         "--seconds", type=int, default=45, help="how long to listen (default 45)"
@@ -246,12 +251,20 @@ def _cmd_models(cfg, args) -> int:
         print("  run.bat models --all         both")
         return 0
 
+    archive = Path(args.archive) if getattr(args, "archive", None) else None
+    if archive is not None and len(wanted) != 1:
+        print(
+            "error: --file installs one bundle, so name exactly one.\n"
+            "  e.g.  run.bat models --parakeet --file C:\\path\\to\\model.tar.bz2"
+        )
+        return 1
+
     for key in wanted:
         bundle = models.BY_KEY[key]
         try:
-            models.install(bundle, cfg.root, force=args.force)
+            models.install(bundle, cfg.root, force=args.force, archive=archive)
         except Exception as exc:
-            print(f"error: could not install {bundle.what}: {exc}")
+            print(f"\nerror: could not install {bundle.what}\n  {exc}")
             return 1
 
     print("\nDone. To use them, in config.toml:")

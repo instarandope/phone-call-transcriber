@@ -500,6 +500,14 @@ run.bat models --parakeet   the faster, more accurate speech engine (~640 MB)
 run.bat models --diarize    speaker labelling (~44 MB)
 ```
 
+If the download fails with **`CERTIFICATE_VERIFY_FAILED`**, that is your network
+inspecting HTTPS traffic, not a problem with the model. The command prints the
+URL and how to finish by hand: download it in a browser, then
+
+```
+run.bat models --parakeet --file "C:\path\to\the-file-you-downloaded.tar.bz2"
+```
+
 ### Parakeet instead of Whisper
 
 ```toml
