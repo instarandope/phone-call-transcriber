@@ -281,6 +281,14 @@ Everything can be run by double-clicking, so you never need a terminal:
 | **`prompt.bat`** | Show exactly what the model is told to extract from a call. |
 | **`last.bat`** | Bring back the most recent work order and re-copy it. |
 
+Plus, from a terminal:
+
+```
+run.bat models                          list the optional models
+run.bat models --all                    fetch both
+run.bat compare x.wav --engines whisper:base.en,parakeet
+```
+
 The less common ones need a terminal, because they take an argument. Open the
 folder in File Explorer, click the address bar, type `cmd` and press Enter — a
 Command Prompt opens already pointed at the folder. Then:
@@ -455,6 +463,69 @@ Consent rules for recording phone calls vary by state and country. Some places
 require only one party to know; others require everyone on the line to consent.
 Check what applies where you operate, and if you need an announcement at the
 start of the call, make sure it is in place before you rely on this.
+
+## Optional: a faster speech engine, and knowing who spoke
+
+Neither ships with the code. Both are one command to fetch and one line to
+enable, and both are worth measuring on your own calls rather than taking on
+trust.
+
+```
+run.bat models              see what is installed
+run.bat models --parakeet   the faster, more accurate speech engine (~640 MB)
+run.bat models --diarize    speaker labelling (~44 MB)
+```
+
+### Parakeet instead of Whisper
+
+```toml
+[transcribe]
+engine = "parakeet"
+```
+
+Whisper decodes one token at a time, which is exactly what an older CPU is bad
+at. Parakeet is a transducer, does far less sequential work, and independent
+benchmarks put it several times faster than Whisper small on CPU while scoring
+*better* on English. It also rarely invents text over silence, which phone
+calls are full of.
+
+Test it against a call you already know the answer to:
+
+```
+run.bat compare somecall.wav --engines whisper:base.en,parakeet
+```
+
+That prints both transcripts and both timings. **Read them rather than
+comparing the numbers** — the engine that gets the address and the part name
+right wins regardless of the clock.
+
+### Who said what
+
+```toml
+[diarize]
+enabled = true
+```
+
+Your transcript arrives labelled:
+
+```
+SIDE A: Good afternoon, Lester speaking.
+SIDE B: Yes, hi Lester. Rumi here, I'm calling about...
+```
+
+This matters more than it looks. A mixed handset tap gives no indication who is
+talking, so every "which of these two names is the customer" question has been
+the model inferring it from context — and when it inferred wrongly, the person
+answering the phone ended up on the work order as the customer. Labels turn
+that from a judgement into a fact.
+
+It costs roughly a minute per call and needs the models above. The labels stay
+deliberately neutral — SIDE A and SIDE B, not "customer" and "agent" — because
+deciding which side is the customer is a question about what was said, and that
+belongs in the extraction step where the words are.
+
+If the models are missing, you get an unlabelled transcript and a note saying
+so. The call is never lost over it.
 
 ## When the work order gets something wrong
 

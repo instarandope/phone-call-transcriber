@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from . import audio as audio_mod
+from . import diarize as diarize_mod
 from . import extract, hotkey, notify, storage, transcribe, workorder
 from .vad import Call, CallDetector, ManualDetector, State
 
@@ -85,9 +86,24 @@ def process_call(call: Call, cfg, *, ui=None) -> Result:
     # keep_audio is on, is never written anywhere. There is no temp file to
     # leak, no window during which a copy exists on disk, and nothing to clean
     # up if this function raises.
+    turns = None
+    if cfg.diarize.enabled:
+        try:
+            log.info("working out who is speaking")
+            turns = diarize_mod.diarize(
+                transcribe.to_float_mono(call.audio), call.sample_rate,
+                cfg.diarize, cfg.root,
+            )
+        except diarize_mod.DiarizationError as exc:
+            # A transcript without speaker labels is far better than no
+            # transcript, so this degrades rather than stopping the call.
+            warnings.append(f"Speaker labelling was skipped: {exc}")
+            turns = None
+
     log.info("transcribing %.0fs of audio", call.duration_s)
     result = transcribe.transcribe(
-        call.audio, call.sample_rate, cfg.transcribe, cfg.audio.stereo_mode
+        call.audio, call.sample_rate, cfg.transcribe, cfg.audio.stereo_mode,
+        turns=turns, root=cfg.root,
     )
     transcript_text = result.text
 

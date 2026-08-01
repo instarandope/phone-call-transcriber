@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -22,6 +23,9 @@ log = logging.getLogger(__name__)
 _model = None
 _model_key: tuple | None = None
 _model_lock = threading.Lock()
+
+_parakeet = None
+_parakeet_key: tuple | None = None
 
 
 @dataclass
@@ -88,6 +92,68 @@ def load_model(cfg):
         return _model
 
 
+class EngineError(RuntimeError):
+    """Raised when the configured speech engine cannot be used."""
+
+
+def load_parakeet(cfg, root: Path):
+    """Load (and memoize) the Parakeet recognizer.
+
+    Whisper decodes autoregressively, one token at a time, which is what makes
+    it slow on an old CPU. Parakeet is a transducer and does far less
+    sequential work, so it runs several times faster there while scoring better
+    on English -- and unlike whisper it does not invent sentences over silence.
+    """
+    global _parakeet, _parakeet_key
+
+    folder = Path(cfg.parakeet_dir) if cfg.parakeet_dir else root / "models/parakeet"
+    if not folder.is_absolute():
+        folder = root / folder
+    key = (str(folder), cfg.num_threads, cfg.beam_size)
+
+    with _model_lock:
+        if _parakeet is not None and _parakeet_key == key:
+            return _parakeet
+
+        try:
+            import sherpa_onnx
+        except ImportError as exc:
+            raise EngineError(
+                "sherpa-onnx is not installed, so the parakeet engine cannot run. "
+                "Re-run install.bat."
+            ) from exc
+
+        needed = {
+            "encoder": folder / "encoder.int8.onnx",
+            "decoder": folder / "decoder.int8.onnx",
+            "joiner": folder / "joiner.int8.onnx",
+            "tokens": folder / "tokens.txt",
+        }
+        missing = [str(p) for p in needed.values() if not p.exists()]
+        if missing:
+            raise EngineError(
+                "the parakeet model is not downloaded yet -- missing "
+                f"{missing[0]}.\n  Run:  run.bat models --parakeet"
+            )
+
+        log.info("loading parakeet from %s", folder)
+        _parakeet = sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=str(needed["encoder"]),
+            decoder=str(needed["decoder"]),
+            joiner=str(needed["joiner"]),
+            tokens=str(needed["tokens"]),
+            num_threads=cfg.num_threads,
+            sample_rate=16000,
+            feature_dim=80,
+            # NeMo transducers use a different blank/joiner convention to the
+            # icefall ones; naming the type is what selects it.
+            model_type="nemo_transducer",
+            decoding_method="greedy_search" if cfg.beam_size <= 1 else "modified_beam_search",
+        )
+        _parakeet_key = key
+        return _parakeet
+
+
 def detect_layout(audio: np.ndarray) -> str:
     """Decide whether a 2-channel recording holds one signal or two.
 
@@ -111,19 +177,34 @@ def detect_layout(audio: np.ndarray) -> str:
     return "mixed" if abs(corr) > 0.9 else "split"
 
 
-def transcribe(audio: np.ndarray, sample_rate: int, cfg, stereo_mode: str = "auto") -> Transcript:
-    """Transcribe a finished call."""
-    model = load_model(cfg)
+def transcribe(
+    audio: np.ndarray,
+    sample_rate: int,
+    cfg,
+    stereo_mode: str = "auto",
+    turns=None,
+    root: Path | None = None,
+) -> Transcript:
+    """Transcribe a finished call.
 
+    `turns` is optional diarization output. When present the recording is
+    transcribed turn by turn and each line carries a speaker, which is the
+    whole point -- a mixed handset tap otherwise gives no way to tell the
+    person answering from the person calling.
+    """
+    root = root or Path.cwd()
     layout = detect_layout(audio) if stereo_mode == "auto" else stereo_mode
     if audio.ndim < 2 or audio.shape[1] < 2:
         layout = "mono"
     duration = len(audio) / sample_rate
 
     if layout == "split":
-        segments = _transcribe_split(model, audio, cfg)
+        segments = _transcribe_split(audio, cfg, root)
+    elif turns:
+        segments = _transcribe_turns(to_float_mono(audio), sample_rate, cfg, turns, root)
+        layout = "diarized"
     else:
-        segments = _run(model, _to_float_mono(audio), cfg)
+        segments = _run(to_float_mono(audio), cfg, root)
 
     return Transcript(
         segments=segments,
@@ -133,7 +214,33 @@ def transcribe(audio: np.ndarray, sample_rate: int, cfg, stereo_mode: str = "aut
     )
 
 
-def _transcribe_split(model, audio: np.ndarray, cfg) -> list[Segment]:
+def _transcribe_turns(samples, sample_rate, cfg, turns, root) -> list[Segment]:
+    """One pass per speaker turn, so every line knows who said it."""
+    from . import diarize as diarize_mod
+
+    merged = diarize_mod.merge_adjacent(turns)
+    names = diarize_mod.label(merged)
+
+    out: list[Segment] = []
+    for turn in merged:
+        first = max(0, int(turn.start * sample_rate))
+        last = min(len(samples), int(turn.end * sample_rate))
+        if last - first < sample_rate // 4:  # under 250 ms is not a sentence
+            continue
+        for segment in _run(samples[first:last], cfg, root):
+            out.append(
+                Segment(
+                    start=turn.start + segment.start,
+                    end=turn.start + segment.end,
+                    text=segment.text,
+                    speaker=names.get(turn.speaker, f"SPEAKER {turn.speaker}"),
+                )
+            )
+    out.sort(key=lambda s: s.start)
+    return out
+
+
+def _transcribe_split(audio: np.ndarray, cfg, root) -> list[Segment]:
     """Transcribe each side separately, then interleave chronologically.
 
     Which physical channel is the caller varies by how the adapter is wired, so
@@ -143,7 +250,7 @@ def _transcribe_split(model, audio: np.ndarray, cfg) -> list[Segment]:
     merged: list[Segment] = []
     for index, label in ((0, "SIDE A"), (1, "SIDE B")):
         channel = audio[:, index]
-        for seg in _run(model, _to_float_mono(channel), cfg):
+        for seg in _run(to_float_mono(channel), cfg, root):
             seg.speaker = label
             merged.append(seg)
     merged.sort(key=lambda s: s.start)
@@ -165,7 +272,49 @@ def _initial_prompt(cfg) -> str | None:
     return f"The following conversation may mention: {vocabulary}."
 
 
-def _run(model, samples: np.ndarray, cfg) -> list[Segment]:
+def _run(samples: np.ndarray, cfg, root: Path) -> list[Segment]:
+    """Transcribe one stretch of mono audio with whichever engine is chosen."""
+    engine = (getattr(cfg, "engine", "whisper") or "whisper").lower()
+    if engine == "parakeet":
+        return _run_parakeet(samples, cfg, root)
+    return _run_whisper(samples, cfg)
+
+
+def _run_parakeet(samples: np.ndarray, cfg, root: Path) -> list[Segment]:
+    recognizer = load_parakeet(cfg, root)
+
+    windows = _speech_windows(samples, cfg)
+    if not windows:
+        return []
+
+    streams = []
+    for start, end in windows:
+        stream = recognizer.create_stream()
+        stream.accept_waveform(16000, np.ascontiguousarray(
+            samples[int(start * 16000) : int(end * 16000)], dtype=np.float32
+        ))
+        streams.append(stream)
+
+    recognizer.decode_streams(streams)
+    return [
+        Segment(start=start, end=end, text=stream.result.text.strip())
+        for (start, end), stream in zip(windows, streams)
+        if stream.result.text and stream.result.text.strip()
+    ]
+
+
+def _speech_windows(samples: np.ndarray, cfg) -> list[tuple[float, float]]:
+    from .vad import speech_windows
+
+    # A turn already bounded by diarization is short enough to send whole.
+    duration = len(samples) / 16000
+    if duration <= 30:
+        return [(0.0, duration)]
+    return speech_windows(samples, 16000)
+
+
+def _run_whisper(samples: np.ndarray, cfg) -> list[Segment]:
+    model = load_model(cfg)
     segments, _info = model.transcribe(
         samples,
         language=cfg.language or None,
@@ -184,7 +333,7 @@ def _run(model, samples: np.ndarray, cfg) -> list[Segment]:
     ]
 
 
-def _to_float_mono(audio: np.ndarray) -> np.ndarray:
+def to_float_mono(audio: np.ndarray) -> np.ndarray:
     """int16 (samples, ch) -> float32 mono in [-1, 1], which is whisper's input."""
     data = audio.astype(np.float32)
     if data.ndim > 1 and data.shape[1] > 1:

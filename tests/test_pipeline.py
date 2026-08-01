@@ -35,7 +35,7 @@ def stub_models(monkeypatch):
     """Stand in for whisper and Ollama, and record that they were called."""
     seen = {}
 
-    def fake_transcribe(audio, rate, tcfg, stereo_mode="auto"):
+    def fake_transcribe(audio, rate, tcfg, stereo_mode="auto", turns=None, root=None):
         seen["transcribed"] = True
         return transcribe.Transcript(
             segments=[

@@ -111,6 +111,27 @@ beep = true
 
 
 [transcribe]
+# Which speech engine to use.
+#
+#   whisper  -- faster-whisper. Downloads its own weights, takes a vocabulary
+#               hint, and is slow on an old CPU because it decodes one token at
+#               a time.
+#   parakeet -- NVIDIA Parakeet TDT via sherpa-onnx. Several times faster on
+#               CPU, better English accuracy, and it does not invent sentences
+#               over silence the way whisper sometimes does.
+#               Run `run.bat models --parakeet` first (~640 MB, one time).
+#
+# Compare them on a call of your own rather than taking anyone's word:
+#     run.bat compare somecall.wav --engines whisper:base.en,parakeet
+engine = "whisper"
+
+# Where the parakeet model lives. Blank means models/parakeet next to this file.
+parakeet_dir = ""
+
+# CPU threads for parakeet and for speaker labelling. Your core count is a
+# sensible starting point; more than that just adds contention.
+num_threads = 4
+
 # faster-whisper model. Telephone audio is narrowband, so bigger is not always
 # better. small.en is the sweet spot on CPU; use distil-large-v3 on a GPU.
 #   tiny.en  base.en  small.en  medium.en  distil-large-v3
@@ -135,6 +156,36 @@ compute_type = "int8"
 beam_size = 1
 
 language = "en"
+
+
+[diarize]
+# Label who is speaking on each line of the transcript.
+#
+# A handset tap that mixes both sides produces one signal and no idea who said
+# what, which is why the person answering the phone kept being recorded as the
+# customer. The business name and staff list work around that by giving the
+# model context to reason from; this settles it from the audio instead, so the
+# transcript arrives already marked SIDE A and SIDE B.
+#
+# Off by default: it needs a download and adds roughly a minute per call.
+#     run.bat models --diarize      (~44 MB, one time)
+enabled = false
+
+# Blank means models/diarize-segmentation and models/diarize-embedding.
+segmentation_model = ""
+embedding_model = ""
+
+# How many people are on the call. Two, for a phone call -- and saying so
+# outright removes the part of the problem diarizers are worst at, which is
+# working out how many voices there are. Set to -1 to let it decide.
+speakers = 2
+
+num_threads = 4
+
+# Speech shorter than this is not a turn, and silence shorter than this does
+# not end one. The defaults suit conversation.
+min_speech_s = 0.3
+min_silence_s = 0.5
 
 
 [extract]

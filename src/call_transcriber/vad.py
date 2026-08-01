@@ -350,6 +350,92 @@ class ManualDetector:
         )
 
 
+def speech_windows(
+    samples: np.ndarray,
+    sample_rate: int = 16000,
+    # 20 ms, matching CallDetector. webrtcvad's verdict genuinely differs by
+    # frame length, and having two parts of one app disagree about what counts
+    # as speech is a bug waiting to be blamed on something else.
+    frame_ms: int = 20,
+    aggressiveness: int = 2,
+    max_window_s: float = 25.0,
+    join_gap_s: float = 0.6,
+    pad_s: float = 0.2,
+) -> list[tuple[float, float]]:
+    """Find the stretches of speech in a finished recording.
+
+    Whisper slices long audio up internally; Parakeet does not -- it recognises
+    one utterance, so a twenty-five minute call has to be cut somewhere. Cutting
+    on silence rather than on a clock keeps words intact.
+
+    `samples` is float32 mono in [-1, 1]. Returns (start, end) in seconds.
+    """
+    try:
+        import webrtcvad
+    except ImportError:  # pragma: no cover - install-time problem
+        return [(0.0, len(samples) / sample_rate)]
+
+    detector = webrtcvad.Vad(aggressiveness)
+    step = int(sample_rate * frame_ms / 1000)
+    if step <= 0 or len(samples) < step:
+        return [(0.0, len(samples) / sample_rate)]
+
+    voiced: list[bool] = []
+    for start in range(0, len(samples) - step + 1, step):
+        frame = samples[start : start + step]
+        pcm = (np.clip(frame, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+        try:
+            voiced.append(detector.is_speech(pcm, sample_rate))
+        except Exception:
+            voiced.append(False)
+
+    windows: list[list[float]] = []
+    gap_frames = max(1, round(join_gap_s * 1000 / frame_ms))
+    quiet = 0
+    for index, is_speech in enumerate(voiced):
+        at = index * frame_ms / 1000
+        if is_speech:
+            # A short gap inside a sentence should not become a cut.
+            if windows and quiet <= gap_frames:
+                windows[-1][1] = at + frame_ms / 1000
+            else:
+                windows.append([at, at + frame_ms / 1000])
+            quiet = 0
+        else:
+            quiet += 1
+
+    if not windows:
+        return []
+
+    duration = len(samples) / sample_rate
+    padded = [
+        (max(0.0, start - pad_s), min(duration, end + pad_s)) for start, end in windows
+    ]
+
+    # Padding can push neighbouring windows into each other. Left overlapping,
+    # the same words get transcribed twice and appear twice in the transcript.
+    joined: list[tuple[float, float]] = []
+    for start, end in padded:
+        if joined and start <= joined[-1][1]:
+            joined[-1] = (joined[-1][0], max(joined[-1][1], end))
+        else:
+            joined.append((start, end))
+
+    return _cap_length(joined, max_window_s)
+
+
+def _cap_length(windows: list[tuple[float, float]], limit: float) -> list[tuple[float, float]]:
+    """Split anything longer than the limit, for someone who never pauses."""
+    out: list[tuple[float, float]] = []
+    for start, end in windows:
+        while end - start > limit:
+            out.append((start, start + limit))
+            start += limit
+        if end > start:
+            out.append((start, end))
+    return out
+
+
 def _as_int16(frame: np.ndarray) -> np.ndarray:
     if frame.dtype == np.int16:
         return frame

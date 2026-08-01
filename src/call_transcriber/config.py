@@ -44,6 +44,15 @@ class DetectConfig:
 
 @dataclass
 class TranscribeConfig:
+    # whisper  -- faster-whisper. Fetches its own weights, biases well to a
+    #             vocabulary, slow on an old CPU because it decodes one token
+    #             at a time.
+    # parakeet -- NVIDIA Parakeet TDT via sherpa-onnx. Several times faster on
+    #             CPU, scores better on English, and does not hallucinate over
+    #             silence. Needs `run.bat models --parakeet` first.
+    engine: str = "whisper"
+    parakeet_dir: str = ""
+    num_threads: int = 4
     model: str = "base.en"
     # Trade vocabulary, fed to whisper so it expects these words. Far more
     # effective on domain terms than moving to a larger model.
@@ -57,6 +66,22 @@ class TranscribeConfig:
     compute_type: str = "int8"
     beam_size: int = 1
     language: str = "en"
+
+
+@dataclass
+class DiarizeConfig:
+    # Off by default: it needs models downloading and adds a minute or so per
+    # call. Worth turning on because a mixed handset tap otherwise gives no way
+    # to tell who said what, which is where most extraction mistakes start.
+    enabled: bool = False
+    segmentation_model: str = ""
+    embedding_model: str = ""
+    # A phone call is two people. Saying so outright removes the part of
+    # diarization that goes wrong most.
+    speakers: int = 2
+    num_threads: int = 4
+    min_speech_s: float = 0.3
+    min_silence_s: float = 0.5
 
 
 @dataclass
@@ -111,6 +136,7 @@ class Config:
     detect: DetectConfig = field(default_factory=DetectConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
     transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
+    diarize: DiarizeConfig = field(default_factory=DiarizeConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     business: BusinessConfig = field(default_factory=BusinessConfig)
@@ -173,6 +199,7 @@ def load(path: Path | None = None, root: Path | None = None) -> Config:
         "detect": DetectConfig,
         "control": ControlConfig,
         "transcribe": TranscribeConfig,
+        "diarize": DiarizeConfig,
         "extract": ExtractConfig,
         "output": OutputConfig,
         "business": BusinessConfig,
@@ -225,6 +252,19 @@ def _validate(cfg: Config) -> Config:
             f"calls -- using {corrected}"
         )
         cfg.detect.line_dead_dbfs = corrected
+
+    if cfg.transcribe.engine not in ("whisper", "parakeet"):
+        cfg.warnings.append(
+            f"transcribe.engine {cfg.transcribe.engine!r} is not valid -- using "
+            f"'whisper'. Choose 'whisper' or 'parakeet'."
+        )
+        cfg.transcribe.engine = "whisper"
+
+    if cfg.diarize.speakers < 1:
+        cfg.warnings.append(
+            f"diarize.speakers must be at least 1, got {cfg.diarize.speakers} -- using 2"
+        )
+        cfg.diarize.speakers = 2
 
     if cfg.control.mode not in ("auto", "manual"):
         cfg.warnings.append(

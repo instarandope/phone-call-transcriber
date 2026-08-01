@@ -38,7 +38,7 @@ def test_a_silent_second_channel_is_treated_as_mono():
 
 def test_int16_is_converted_to_the_float_range_whisper_expects():
     audio = np.full((100, 1), 16384, dtype=np.int16)
-    out = transcribe._to_float_mono(audio)
+    out = transcribe.to_float_mono(audio)
     assert out.dtype == np.float32
     assert out.ndim == 1
     assert abs(float(out[0]) - 0.5) < 0.01
@@ -48,7 +48,7 @@ def test_stereo_is_downmixed_to_one_channel():
     audio = np.stack(
         [np.full(100, 16384, dtype=np.int16), np.zeros(100, dtype=np.int16)], axis=1
     )
-    out = transcribe._to_float_mono(audio)
+    out = transcribe.to_float_mono(audio)
     assert out.shape == (100,)
     assert abs(float(out[0]) - 0.25) < 0.01
 

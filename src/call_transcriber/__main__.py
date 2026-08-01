@@ -36,12 +36,16 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_prompt(cfg)
     if args.command == "last":
         return _cmd_last(cfg)
+    if args.command == "models":
+        return _cmd_models(cfg, args)
     if args.command == "levels":
         return _cmd_levels(cfg, args.seconds)
     if args.command == "test":
         return _cmd_test(cfg, Path(args.file))
     if args.command == "compare":
-        return _cmd_compare(cfg, Path(args.file) if args.file else None, args.models)
+        return _cmd_compare(
+            cfg, Path(args.file) if args.file else None, args.models, args.engines
+        )
     if args.command == "purge":
         return _cmd_purge(cfg, args.purge_all)
     return _cmd_run(cfg, use_tray=args.tray)
@@ -68,6 +72,11 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="check the setup")
     sub.add_parser("prompt", help="show exactly what the model is told to extract")
     sub.add_parser("last", help="reprint the most recent work order")
+    fetch = sub.add_parser("models", help="download the optional speech models")
+    fetch.add_argument("--parakeet", action="store_true", help="the Parakeet speech engine")
+    fetch.add_argument("--diarize", action="store_true", help="speaker labelling models")
+    fetch.add_argument("--all", action="store_true", dest="all_models", help="both")
+    fetch.add_argument("--force", action="store_true", help="re-download even if present")
     levels = sub.add_parser("levels", help="measure your line and suggest thresholds")
     levels.add_argument(
         "--seconds", type=int, default=45, help="how long to listen (default 45)"
@@ -84,8 +93,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     compare.add_argument(
         "--models",
-        required=True,
-        help="comma-separated Ollama models, e.g. gemma3:4b,gemma3n:e4b",
+        help="comma-separated Ollama models to compare, e.g. gemma3:4b,gemma4:e4b",
+    )
+    compare.add_argument(
+        "--engines",
+        help="comma-separated speech engines to compare, e.g. whisper:base.en,"
+        "whisper:small.en,parakeet -- needs an audio file, not a transcript",
     )
     purge = sub.add_parser("purge", help="securely delete kept recordings")
     purge.add_argument(
@@ -209,6 +222,43 @@ def _cmd_devices() -> int:
     print("`run.bat levels` and talk into the handset. If the meter moves, it is the")
     print("right one. If two different devices share a name, set audio.device_index")
     print("to one of the numbers above instead.")
+    return 0
+
+
+def _cmd_models(cfg, args) -> int:
+    """Fetch the optional model bundles. Neither ships with the code."""
+    from . import models
+
+    wanted: list[str] = []
+    if args.all_models or args.parakeet:
+        wanted.append("parakeet")
+    if args.all_models or args.diarize:
+        wanted.extend(models.DIARIZATION_KEYS)
+
+    if not wanted:
+        print("Optional models:\n")
+        for bundle, installed in models.status(cfg.root):
+            mark = "installed" if installed else "not installed"
+            print(f"  [{mark:>13}]  {bundle.what}  (~{bundle.size_mb} MB)")
+        print()
+        print("  run.bat models --parakeet    faster, more accurate speech engine")
+        print("  run.bat models --diarize     label who is speaking on each line")
+        print("  run.bat models --all         both")
+        return 0
+
+    for key in wanted:
+        bundle = models.BY_KEY[key]
+        try:
+            models.install(bundle, cfg.root, force=args.force)
+        except Exception as exc:
+            print(f"error: could not install {bundle.what}: {exc}")
+            return 1
+
+    print("\nDone. To use them, in config.toml:")
+    if "parakeet" in wanted:
+        print('    [transcribe]\n    engine = "parakeet"')
+    if "segmentation" in wanted:
+        print("    [diarize]\n    enabled = true")
     return 0
 
 
@@ -507,7 +557,19 @@ def _latest_input(cfg) -> Path | None:
     return None
 
 
-def _cmd_compare(cfg, path: Path | None, models: str) -> int:
+def _parse_engine(spec: str, cfg):
+    """'parakeet' or 'whisper:small.en' -> a transcribe config to run with."""
+    import copy
+
+    settings = copy.copy(cfg.transcribe)
+    engine, _, model = spec.partition(":")
+    settings.engine = engine.strip().lower() or "whisper"
+    if model.strip():
+        settings.model = model.strip()
+    return settings
+
+
+def _cmd_compare(cfg, path: Path | None, models: str | None, engines: str | None) -> int:
     """Run one recording through several extraction models.
 
     Which model to use is an empirical question about a specific machine and a
@@ -535,9 +597,10 @@ def _cmd_compare(cfg, path: Path | None, models: str) -> int:
         print(f"error: {path} does not exist")
         return 1
 
-    wanted = [m.strip() for m in models.split(",") if m.strip()]
-    if not wanted:
-        print("error: --models is empty")
+    wanted = [m.strip() for m in (models or "").split(",") if m.strip()]
+    engine_specs = [e.strip() for e in (engines or "").split(",") if e.strip()]
+    if not wanted and not engine_specs:
+        print("error: give --models, --engines, or both")
         return 1
 
     duration_s = None
@@ -553,9 +616,23 @@ def _cmd_compare(cfg, path: Path | None, models: str) -> int:
         duration_s = result.duration_s
         print(f"  {_time.monotonic() - started:.0f}s, {len(result.segments)} segments\n")
 
+    if engine_specs:
+        if path.suffix.lower() in TEXT_SUFFIXES:
+            print(
+                "error: --engines compares speech recognition, so it needs a "
+                "recording rather than a transcript.\n"
+                "  Set keep_audio = true under [output], take a call, and point "
+                "this at the call.wav."
+            )
+            return 1
+        transcript_text = _compare_engines(cfg, audio, rate, engine_specs) or transcript_text
+
     if not transcript_text:
         print("That transcript is empty, so there is nothing to compare.")
         return 1
+
+    if not wanted:
+        return 0
 
     scored = []
     for model in wanted:
@@ -591,6 +668,58 @@ def _cmd_compare(cfg, path: Path | None, models: str) -> int:
         print("  invents an address scores well here and sends a tech to the wrong")
         print("  house. Read the work orders above against the transcript.")
     return 0
+
+
+def _compare_engines(cfg, audio, rate: int, specs: list[str]) -> str:
+    """Transcribe the same recording with each engine and print both.
+
+    Speed is only half the question. Read the transcripts: the one that gets
+    the address, the part name and the phone number right is the one that
+    matters, and that does not always follow the clock.
+    """
+    import time as _time
+
+    from . import transcribe
+
+    first = ""
+    timings = []
+    for spec in specs:
+        settings = _parse_engine(spec, cfg)
+        label = f"{settings.engine}" + (
+            f":{settings.model}" if settings.engine == "whisper" else ""
+        )
+        print("=" * 72)
+        print(f"  {label}")
+        print("=" * 72)
+
+        started = _time.monotonic()
+        try:
+            result = transcribe.transcribe(
+                audio, rate, settings, cfg.audio.stereo_mode, root=cfg.root
+            )
+        except Exception as exc:
+            print(f"  failed: {exc}\n")
+            continue
+        elapsed = _time.monotonic() - started
+
+        print(result.text or "  (nothing transcribed)")
+        speed = result.duration_s / elapsed if elapsed else 0
+        print(f"\n  {elapsed:.0f}s for {result.duration_s:.0f}s of audio "
+              f"({speed:.1f}x real time), {len(result.segments)} segments\n")
+        timings.append((label, elapsed, speed, len(result.text)))
+        first = first or result.text
+
+    if len(timings) > 1:
+        print("=" * 72)
+        print(f"  {'engine':<22} {'seconds':>9} {'x real time':>12} {'chars':>8}")
+        print("-" * 72)
+        for label, elapsed, speed, chars in timings:
+            print(f"  {label:<22} {elapsed:>9.0f} {speed:>12.1f} {chars:>8}")
+        print()
+        print("  Read them, do not just compare the numbers. More characters is")
+        print("  not better if the extra ones are wrong, and the engine that gets")
+        print("  the address right wins however long it took.\n")
+    return first
 
 
 def fields_with_values(data: dict) -> list:
