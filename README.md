@@ -44,6 +44,30 @@ STILL NEEDED
 Everything runs locally. No audio, no transcript and no customer detail is sent
 anywhere — there is no account, no API key and no cloud service involved.
 
+## What touches the network, exactly
+
+You can check this yourself: `grep -rn "urlopen\|requests\." src/`. There are
+three network references in the whole project.
+
+| | |
+|---|---|
+| **Call audio** | Never sent anywhere. Transcribed in memory, and not even written to disk unless you turn `keep_audio` on. |
+| **Transcripts** | Sent to `http://127.0.0.1:11434` — Ollama, on this PC. That is loopback: two programs on one machine talking to each other. It never reaches a network card. |
+| **The internet** | Used to download models, once, and never again. Nothing is ever uploaded. |
+
+The word "API" appears because Ollama speaks HTTP — but to `127.0.0.1`, your own
+machine. It is the same kind of "API" as one program opening another's file.
+
+**The one setting that could change that is `extract.base_url`.** If it ever
+points somewhere that is not this machine, every transcript — names, addresses,
+phone numbers — would be sent there. So the app refuses to be quiet about it:
+`config.toml` loading warns, and `doctor.bat` reports it under **Where the data
+goes**. If that line ever reads anything other than `(this machine)`, stop and
+look at why.
+
+Unplug the network cable and everything still works, once the models are
+downloaded.
+
 ## Two ways to run it
 
 Set `mode` under `[control]` in `config.toml`.

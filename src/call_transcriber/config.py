@@ -9,9 +9,11 @@ than one that complains.
 from __future__ import annotations
 
 import dataclasses
+import ipaddress
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -219,6 +221,29 @@ def load(path: Path | None = None, root: Path | None = None) -> Config:
     return _validate(cfg)
 
 
+LOOPBACK_NAMES = {"localhost", "ip6-localhost", "ip6-loopback"}
+
+
+def is_local(url: str) -> bool:
+    """Is this address on this machine?
+
+    The whole point of the project is that call audio and customer details
+    never leave the building. Everything is local by construction except one
+    thing -- the address extraction posts transcripts to -- and that is a
+    setting, so it is the one place a mistake or an edit could quietly start
+    sending client conversations somewhere else.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return False
+    if host in LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _validate(cfg: Config) -> Config:
     """Clamp values that would crash a downstream library if passed through."""
     if not 0 <= cfg.detect.vad_aggressiveness <= 3:
@@ -252,6 +277,14 @@ def _validate(cfg: Config) -> Config:
             f"calls -- using {corrected}"
         )
         cfg.detect.line_dead_dbfs = corrected
+
+    if not is_local(cfg.extract.base_url):
+        cfg.warnings.append(
+            f"extract.base_url points at {cfg.extract.base_url}, which is NOT this "
+            f"machine. Every call transcript -- names, addresses, phone numbers -- "
+            f"would be sent there. Set it back to http://127.0.0.1:11434 unless you "
+            f"genuinely intend that."
+        )
 
     if cfg.transcribe.engine not in ("whisper", "parakeet"):
         cfg.warnings.append(

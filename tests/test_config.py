@@ -1,3 +1,5 @@
+import pytest
+
 from call_transcriber import config
 
 
@@ -117,3 +119,41 @@ def test_min_longer_than_max_would_discard_every_call(tmp_path):
 def test_output_dir_resolves_against_root(tmp_path):
     cfg = config.load(root=tmp_path)
     assert cfg.output_dir == tmp_path / "output"
+
+
+# -- nothing leaves this machine -------------------------------------------
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:11434",
+    "http://localhost:11434",
+    "http://[::1]:11434",
+    "http://127.0.0.2:11434",
+])
+def test_addresses_on_this_machine_are_recognised(url):
+    assert config.is_local(url) is True
+
+
+@pytest.mark.parametrize("url", [
+    "http://192.168.1.50:11434",
+    "https://api.example.com",
+    "http://ollama.mycompany.internal:11434",
+    "http://10.0.0.5:11434",
+    "",
+])
+def test_anything_else_is_not(url):
+    assert config.is_local(url) is False
+
+
+def test_pointing_extraction_off_the_machine_is_called_out(tmp_path):
+    """Transcripts carry names, addresses and phone numbers."""
+    (tmp_path / "config.toml").write_text(
+        '[extract]\nbase_url = "https://api.example.com"\n', encoding="utf-8"
+    )
+    cfg = config.load(root=tmp_path)
+
+    assert any("NOT this machine" in w for w in cfg.warnings)
+
+
+def test_the_shipped_default_stays_on_this_machine(tmp_path):
+    assert config.is_local(config.load(tmp_path / "none.toml", root=tmp_path).extract.base_url)

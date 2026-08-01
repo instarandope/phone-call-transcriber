@@ -391,6 +391,19 @@ def _cmd_doctor(cfg) -> int:
     except Exception as exc:
         check(f"whisper {cfg.transcribe.model}", False, str(exc))
 
+    print("\nWhere the data goes")
+    local = config.is_local(cfg.extract.base_url)
+    check(
+        f"transcripts go to {cfg.extract.base_url}"
+        + (" (this machine)" if local else " -- OFF THIS MACHINE"),
+        local,
+        "" if local else
+        "Every transcript would be sent to that address. Set extract.base_url "
+        "back to http://127.0.0.1:11434 unless you genuinely intend this.",
+    )
+    print("  [ok] call audio is never sent anywhere -- it is transcribed in memory")
+    print("  [--] the internet is used once, to download models, and never again")
+
     print("\nOutput")
     try:
         cfg.output_dir.mkdir(parents=True, exist_ok=True)
