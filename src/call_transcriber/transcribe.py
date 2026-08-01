@@ -295,26 +295,49 @@ def _run(samples: np.ndarray, cfg, root: Path) -> list[Segment]:
 
 
 def _run_parakeet(samples: np.ndarray, cfg, root: Path) -> list[Segment]:
+    """Transcribe with Parakeet, a few windows at a time.
+
+    The batch size is the whole point of this loop. sherpa-onnx runs the
+    encoder over every stream handed to `decode_streams` at once, padded to the
+    longest, and holds the activations for all of them -- measured at roughly
+    175 MB per window with this model. Decoding a whole call in one call is
+    therefore not a batch, it is a memory leak with a duration on it:
+
+        10 minutes, 28 windows  ->  7.6 GB
+        30 minutes, 83 windows  ->  killed by the OOM reaper at 16 GB
+
+    A long call would take the program out on the machine it was written for.
+    In groups of four it is bounded at well under a gigabyte however long the
+    call runs, and the padding waste is small because the windows are of
+    similar length by construction.
+    """
     recognizer = load_parakeet(cfg, root)
 
     windows = _speech_windows(samples, cfg)
     if not windows:
         return []
 
-    streams = []
-    for start, end in windows:
-        stream = recognizer.create_stream()
-        stream.accept_waveform(16000, np.ascontiguousarray(
-            samples[int(start * 16000) : int(end * 16000)], dtype=np.float32
-        ))
-        streams.append(stream)
+    size = max(1, int(getattr(cfg, "batch_size", 4) or 1))
+    out: list[Segment] = []
+    for first in range(0, len(windows), size):
+        group = windows[first : first + size]
+        streams = []
+        for start, end in group:
+            stream = recognizer.create_stream()
+            stream.accept_waveform(16000, np.ascontiguousarray(
+                samples[int(start * 16000) : int(end * 16000)], dtype=np.float32
+            ))
+            streams.append(stream)
 
-    recognizer.decode_streams(streams)
-    return [
-        Segment(start=start, end=end, text=stream.result.text.strip())
-        for (start, end), stream in zip(windows, streams)
-        if stream.result.text and stream.result.text.strip()
-    ]
+        recognizer.decode_streams(streams)
+        for (start, end), stream in zip(group, streams):
+            text = stream.result.text.strip() if stream.result.text else ""
+            if text:
+                out.append(Segment(start=start, end=end, text=text))
+        # Let the encoder activations go before building the next group.
+        streams.clear()
+
+    return out
 
 
 def _speech_windows(samples: np.ndarray, cfg) -> list[tuple[float, float]]:

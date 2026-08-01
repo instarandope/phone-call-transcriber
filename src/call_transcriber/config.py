@@ -56,6 +56,12 @@ class TranscribeConfig:
     engine: str = "whisper"
     parakeet_dir: str = ""
     num_threads: int = 4
+    # How many windows parakeet decodes at once. Memory, not speed, sets this:
+    # sherpa-onnx keeps the encoder activations for every window in a batch,
+    # around 175 MB each, so decoding a whole call in one go needed 7.6 GB for
+    # ten minutes and was killed by the OOM reaper at thirty. Four is bounded
+    # under a gigabyte no matter how long the call is.
+    batch_size: int = 4
     model: str = "base.en"
     # Trade vocabulary, fed to whisper so it expects these words. Far more
     # effective on domain terms than moving to a larger model.

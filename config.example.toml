@@ -129,6 +129,13 @@ engine = "whisper"
 # Where the parakeet model lives. Blank means models/parakeet next to this file.
 parakeet_dir = ""
 
+# How many windows parakeet decodes at once. This is a memory setting, not a
+# speed one. sherpa-onnx holds the encoder activations for every window in a
+# batch -- roughly 175 MB each -- so handing it a whole call needed 7.6 GB for
+# ten minutes of audio and was killed outright at thirty. Four stays under a
+# gigabyte however long the call runs. Lower it to 1 if you are short of RAM.
+batch_size = 4
+
 # CPU threads for parakeet and for speaker labelling. Your core count is a
 # sensible starting point; more than that just adds contention.
 num_threads = 4

@@ -668,8 +668,16 @@ local model takes several minutes to work through that on an older CPU. If
 `extract.timeout_s` is set too low the transcript is saved but the work order
 comes back empty, with the reason printed in red at the top of the window.
 
-The default is 600 seconds. Raise it rather than lowering the model, since
+The default is 900 seconds. Raise it rather than lowering the model, since
 nothing is waiting on the result.
+
+**Parakeet's memory does not depend on how long the call is** — but only
+because `transcribe.batch_size` keeps it that way. sherpa-onnx holds the
+encoder activations for every window it decodes in one batch, about 175 MB
+each, so handing it a whole call at once cost 7.6 GB for ten minutes of audio
+and got the process killed outright at thirty. It decodes four windows at a
+time instead, which stays under a gigabyte no matter how long the call runs.
+Drop it to `1` if you are short of memory; there is no reason to raise it.
 
 **`chunk_chars` is not a speed control.** It caps how much text goes into one
 request; anything longer is split, extracted piece by piece, and merged.

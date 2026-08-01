@@ -249,3 +249,70 @@ def test_the_engine_named_in_the_output_is_the_one_that_ran(monkeypatch, tmp_pat
     assert cli._engine_label(settings) == "parakeet"
     settings.engine = "whisper"
     assert cli._engine_label(settings) == "whisper:base.en"
+
+
+# -- parakeet must not decode a whole call in one batch ----------------------
+#
+# sherpa-onnx keeps the encoder activations for every stream handed to
+# decode_streams, about 175 MB each with this model. Measured end to end: a
+# ten minute call peaked at 7.6 GB and a thirty minute one was killed by the
+# OOM reaper at 16 GB -- on a machine that also has Ollama resident.
+
+
+class _Recognizer:
+    """Stands in for sherpa-onnx, recording how much it is asked to hold."""
+
+    def __init__(self):
+        self.live = 0
+        self.high_water = 0
+        self.groups = []
+
+    def create_stream(self):
+        self.live += 1
+        self.high_water = max(self.high_water, self.live)
+        return type("S", (), {"accept_waveform": lambda *a: None,
+                              "result": type("R", (), {"text": "words"})()})()
+
+    def decode_streams(self, streams):
+        self.groups.append(len(streams))
+        self.live -= len(streams)
+
+
+def _run_with(monkeypatch, seconds, batch_size=4):
+    from call_transcriber import transcribe
+
+    recognizer = _Recognizer()
+    monkeypatch.setattr(transcribe, "load_parakeet", lambda cfg, root: recognizer)
+    settings = tcfg(engine="parakeet", batch_size=batch_size)
+    from pathlib import Path as P
+
+    segments = transcribe._run_parakeet(speech(seconds), settings, P("."))
+    return recognizer, segments
+
+
+def test_a_long_call_is_decoded_in_bounded_groups(monkeypatch):
+    """Thirty minutes used to arrive as one batch of 83 and take the process
+    out. What matters is the peak, not the total."""
+    pytest.importorskip("webrtcvad")
+    recognizer, segments = _run_with(monkeypatch, 600)
+
+    assert sum(recognizer.groups) > 8, "the test needs enough windows to matter"
+    assert recognizer.high_water <= 4
+    assert max(recognizer.groups) <= 4
+    assert len(segments) == sum(recognizer.groups)
+
+
+def test_the_batch_size_is_honoured(monkeypatch):
+    pytest.importorskip("webrtcvad")
+    recognizer, _ = _run_with(monkeypatch, 600, batch_size=1)
+
+    assert recognizer.high_water == 1
+    assert set(recognizer.groups) == {1}
+
+
+def test_a_nonsense_batch_size_still_decodes(monkeypatch):
+    pytest.importorskip("webrtcvad")
+    recognizer, segments = _run_with(monkeypatch, 200, batch_size=0)
+
+    assert recognizer.high_water == 1
+    assert segments
