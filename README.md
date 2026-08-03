@@ -795,3 +795,30 @@ needs neither Ollama nor a downloaded whisper model.
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+### The models, and whether you can run a business on them
+
+This runs on a real business's phone line, so every model in it has to be one
+you are allowed to use commercially. All of them are. Checked, because it is
+not a question you want to answer after the fact:
+
+| What | Licence | Commercial use |
+|---|---|---|
+| faster-whisper (library) | MIT | yes |
+| Whisper weights (`base.en` etc.) | MIT | yes |
+| sherpa-onnx (library) | Apache 2.0 | yes |
+| NVIDIA Parakeet TDT 0.6b v2 | CC-BY-4.0 | yes, with attribution |
+| pyannote segmentation 3.0 | MIT | yes |
+| NVIDIA TitaNet speaker embedding | CC-BY-4.0 | yes, with attribution |
+| Ollama | MIT | yes |
+| Gemma 4 | Apache 2.0 | yes |
+
+The only obligation anywhere in that list is attribution for the two NVIDIA
+models under CC-BY-4.0, which this file satisfies.
+
+**Not everything in this space is like that**, and the good ones are often the
+exceptions. CrisperWhisper is the example worth knowing about: excellent
+verbatim transcription and the best word-level timestamps published, MIT
+inference code — and model weights under a non-commercial research licence,
+with commercial use requiring a paid agreement. It is a fine model and it
+cannot be used here. Check the *weights* licence, not the repository's.
