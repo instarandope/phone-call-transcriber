@@ -149,6 +149,10 @@ model = "base.en"
 # between similar-sounding words partly on what it expects, so listing your
 # vocabulary is usually more effective than a bigger model -- and free.
 #
+# WHISPER ONLY. Parakeet has nowhere to put a word list: sherpa-onnx does take
+# a hotwords file, but only with modified_beam_search, and that decoder is not
+# implemented for NeMo transducers. doctor.bat says so if you have both set.
+#
 # Put in the terms that get misheard: parts, brands, street names, your own
 # business name. Keep it under a couple of hundred words.
 #

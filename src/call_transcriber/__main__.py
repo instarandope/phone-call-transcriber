@@ -509,6 +509,17 @@ def _cmd_doctor(cfg) -> int:
         except Exception as exc:
             check(f"whisper {cfg.transcribe.model}", False, str(exc))
 
+    # A setting that quietly does nothing is the thing this project keeps
+    # getting caught by, and this is one: the trade vocabulary reaches whisper
+    # as an initial prompt, and parakeet has nowhere to put it. sherpa-onnx
+    # does take a hotwords file, but only with modified_beam_search, and that
+    # decoder is not implemented for NeMo transducers -- asking for it
+    # segfaults rather than refusing.
+    if cfg.transcribe.engine == "parakeet" and cfg.transcribe.vocabulary.strip():
+        print("  [--] transcribe.vocabulary is set but parakeet cannot use it")
+        print("       Only whisper takes the word list. Parakeet has no hotword")
+        print("       support in sherpa-onnx yet, so those terms are not biased.")
+
     print("\nSpeaker labelling")
     if not cfg.diarize.enabled:
         print("  [--] off -- transcripts will not say who is speaking")

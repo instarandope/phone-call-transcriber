@@ -65,6 +65,10 @@ class TranscribeConfig:
     model: str = "base.en"
     # Trade vocabulary, fed to whisper so it expects these words. Far more
     # effective on domain terms than moving to a larger model.
+    #
+    # Whisper only. Parakeet has no hotword support in sherpa-onnx -- the
+    # hotwords file needs modified_beam_search, which the NeMo transducer
+    # implementation does not provide. doctor reports the mismatch.
     vocabulary: str = (
         "torsion spring, cables, rollers, tracks, panels, hoist, pulleys, "
         "opener, operator, keypad, drum, bracket, weather seal, chain, rail, "
