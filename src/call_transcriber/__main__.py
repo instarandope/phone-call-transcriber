@@ -775,6 +775,11 @@ def _cmd_compare(cfg, path: Path | None, models: str | None, engines: str | None
         print(f"Read {len(transcript_text)} characters of transcript.\n")
     else:
         audio, rate = storage.read_wav(path)
+        # An engine comparison run on a clipped recording measures the
+        # engines' tolerance for distortion, not their accuracy -- worth
+        # knowing before reading anything into the results.
+        for note in pipeline.level_warnings(audio):
+            print(f"  [!!] {note}\n")
 
     if engine_specs:
         # The engines each transcribe the whole recording below, so

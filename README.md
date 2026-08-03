@@ -571,6 +571,44 @@ first. The cuts land in pauses, and every second of the recording ends up in
 exactly one piece — see `speech_windows` in `vad.py` for why that second part
 is load-bearing.
 
+### Should the audio be cleaned up first? (No.)
+
+The pipeline resamples to 16 kHz, downmixes to mono, and deliberately does
+nothing else to the sound. That is not an omission. Both engines were trained
+on enormous amounts of raw, noisy, telephone-grade audio; the distortions a
+clean-up introduces are stranger to them than the noise it removes.
+
+Measured, not assumed — five versions of the same real (and clipped) service
+call, each through Parakeet, scored against a checklist of the words that
+decide the work order:
+
+| preprocessing | score | outcome |
+|---|---|---|
+| none | **18/21** | best |
+| high-pass 150 Hz | 18/21 | identical — harmless, pointless |
+| de-clip (rebuild flattened peaks) | 17/21 | slightly worse than the clipping itself |
+| AI denoise (spectral gating) | 16/21 | lost 1,000 characters, including the greeting |
+| band-pass 250–3800 Hz ("telephone band") | **0/21** | the model went completely mute |
+
+Two of those deserve a sentence. The de-clipper *rebuilding the damaged
+waveform* scored worse than leaving the damage in — the engine has seen
+clipping before, and it has never seen a spline's guess. And the band-pass,
+the most textbook-plausible filter for phone audio, silenced Parakeet
+entirely: with nothing above 3.8 kHz, the upper mel filterbanks see log-zero
+energy and the NeMo feature normalisation collapses. A high-pass at 250 Hz
+alone is fine; a low-pass at 6 kHz is fine; the telephone band-pass produces
+zero text from perfect speech. If you ever bolt a filter onto an engine you
+did not train, test it before trusting it.
+
+The one clean-up that genuinely matters happens before the samples exist:
+**the record level dial.** The call measured above had 0.75% of its samples
+pinned at digital full scale — roughly 12,000 clipped bursts across seven
+minutes — and no software can put those waveform tops back (see the table).
+When the amber note after a call says the recording is clipped, that is a
+measurement, not a nag: turn the dial down and the next call is simply better.
+`compare` prints the same warning, so an engine test on a damaged recording
+announces itself.
+
 ### Is there something better yet?
 
 Checked August 2026. Short answer: not for this machine.
