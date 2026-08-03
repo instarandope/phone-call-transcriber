@@ -571,6 +571,49 @@ first. The cuts land in pauses, and every second of the recording ends up in
 exactly one piece — see `speech_windows` in `vad.py` for why that second part
 is load-bearing.
 
+### Is there something better yet?
+
+Checked August 2026. Short answer: not for this machine.
+
+The top of the [Open ASR Leaderboard](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)
+has moved to Conformer encoders bolted to LLM decoders — IBM Granite Speech 4.1
+2B at 5.33% WER, Cohere Transcribe 2B at 5.42%, NVIDIA Canary-Qwen 2.5B at
+5.63%, Mistral's Voxtral at 4B. Several are Apache 2.0 or MIT, so licensing is
+not the obstacle. Size is. These are two to eight billion parameters, and the
+speed figures published for them are GPU figures. On a 2013 i5 with no GPU and
+Ollama already resident, they are not deployable.
+
+**Parakeet TDT v3 is the trap worth knowing about.** It exists, sherpa-onnx
+publishes an int8 bundle of it, and it would drop straight into this code. It
+is also *worse here*: v3 spent English accuracy to buy 25 European languages,
+scoring **6.34% WER against v2's 6.05%** at the same speed. A higher version
+number, a worse transcript, in exchange for languages this phone line will
+never hear. Stay on v2.
+
+**The gap in this setup is a feature, not a model.** The errors that matter are
+proper nouns — street names, towns, surnames — and the fix for those is keyword
+biasing. Whisper takes it as an initial prompt (`transcribe.vocabulary`);
+Parakeet cannot (see that setting's note). Granite Speech 4.1 is the first
+leaderboard model to ship explicit keyword-list biasing for names and jargon,
+under MIT. If a quantised CPU build of it appears, that is the upgrade to
+revisit. Nothing else on the list changes the answer.
+
+Meanwhile these all run today with no code change, all MIT, and all of them
+take the vocabulary hint:
+
+```
+run.bat compare somecall.wav --engines parakeet,whisper:small.en,whisper:distil-small.en,whisper:large-v3-turbo
+```
+
+| | size | notes |
+|---|---|---|
+| `whisper:small.en` | 244M | the obvious untried middle |
+| `whisper:distil-small.en` | 166M | distilled from large-v3, English only |
+| `whisper:large-v3-turbo` | 809M | within ~0.4 pp of large-v3, four decoder layers instead of thirty-two |
+
+Measure them on your own calls. A leaderboard average over audiobooks and
+podcasts says very little about a narrowband handset tap in a workshop.
+
 ### Who said what
 
 ```toml
