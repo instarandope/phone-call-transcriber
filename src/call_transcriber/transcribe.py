@@ -86,9 +86,12 @@ def load_model(cfg):
         candidates = ["cpu"] if wanted == "cpu" else [wanted, "cpu"]
 
         for attempt, device in enumerate(candidates):
-            log.info("loading whisper model %s (%s, %s)", cfg.model, device, cfg.compute_type)
+            log.info(
+                "loading whisper model %s (%s, %s)", cfg.model, device, _compute_type(cfg, device)
+            )
+            compute = _compute_type(cfg, device)
             try:
-                model = WhisperModel(cfg.model, device=device, compute_type=cfg.compute_type)
+                model = WhisperModel(cfg.model, device=device, compute_type=compute)
                 _wake_up(model)
             except Exception as exc:
                 last = attempt == len(candidates) - 1
@@ -108,6 +111,30 @@ def load_model(cfg):
                 ) from exc
             _model, _model_key = model, key
             return model
+
+
+def _compute_type(cfg, device: str) -> str:
+    """int8 is the right answer on a CPU and the wrong one on a GPU.
+
+    CTranslate2 has no int8 kernels worth having on CUDA, so an int8 request
+    there is quietly served as float32 -- twice the memory and slower than the
+    float16 the card is built for. The shipped default has to suit the machine
+    this was written for, so the GPU case is corrected here rather than by
+    asking anyone to remember a second setting.
+    """
+    configured = (cfg.compute_type or "int8").lower()
+    if device == "cpu" or configured != "int8":
+        return configured
+    return "float16" if device in ("cuda", "auto") and _has_cuda() else configured
+
+
+def _has_cuda() -> bool:
+    try:
+        import ctranslate2
+
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
 
 
 def _wake_up(model) -> None:
@@ -193,22 +220,48 @@ def load_parakeet(cfg, root: Path):
                 f"{missing[0]}.\n  Run:  run.bat models --parakeet"
             )
 
-        log.info("loading parakeet from %s", folder)
-        _parakeet = sherpa_onnx.OfflineRecognizer.from_transducer(
-            encoder=str(needed["encoder"]),
-            decoder=str(needed["decoder"]),
-            joiner=str(needed["joiner"]),
-            tokens=str(needed["tokens"]),
-            num_threads=cfg.num_threads,
-            sample_rate=16000,
-            feature_dim=80,
-            # NeMo transducers use a different blank/joiner convention to the
-            # icefall ones; naming the type is what selects it.
-            model_type="nemo_transducer",
-            decoding_method="greedy_search" if cfg.beam_size <= 1 else "modified_beam_search",
-        )
+        from . import accel
+
+        provider = accel.resolve(getattr(cfg, "provider", "auto"))
+        log.info("loading parakeet from %s on %s", folder, provider)
+        _parakeet = _transducer(sherpa_onnx, needed, cfg, provider)
         _parakeet_key = key
         return _parakeet
+
+
+def _transducer(sherpa_onnx, needed, cfg, provider: str):
+    """Build the recognizer, dropping to the CPU if the accelerator will not.
+
+    An unusable GPU is the normal state of a machine nobody set up for GPU
+    work -- a driver is present, the runtime libraries are not -- and it is
+    not a reason to refuse to transcribe.
+    """
+    try:
+        return _from_transducer(sherpa_onnx, needed, cfg, provider)
+    except Exception as exc:
+        if provider == "cpu":
+            raise
+        log.warning(
+            "could not use the %s provider (%s) -- falling back to the CPU", provider, exc
+        )
+        return _from_transducer(sherpa_onnx, needed, cfg, "cpu")
+
+
+def _from_transducer(sherpa_onnx, needed, cfg, provider: str):
+    return sherpa_onnx.OfflineRecognizer.from_transducer(
+        encoder=str(needed["encoder"]),
+        decoder=str(needed["decoder"]),
+        joiner=str(needed["joiner"]),
+        tokens=str(needed["tokens"]),
+        num_threads=cfg.num_threads,
+        sample_rate=16000,
+        feature_dim=80,
+        # NeMo transducers use a different blank/joiner convention to the
+        # icefall ones; naming the type is what selects it.
+        model_type="nemo_transducer",
+        provider=provider,
+        decoding_method="greedy_search" if cfg.beam_size <= 1 else "modified_beam_search",
+    )
 
 
 def detect_layout(audio: np.ndarray) -> str:

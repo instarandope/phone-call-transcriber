@@ -361,3 +361,78 @@ def test_a_level_note_is_not_dressed_up_as_a_failure(cfg, stub_models):
 
     assert any("record level dial" in w for w in result.warnings)
     assert result.problems == []
+
+
+# -- working through a folder of recordings ---------------------------------
+#
+# For testing against real calls without waiting for the phone to ring: drop
+# the recordings in a folder and walk away.
+
+
+def _stub_batch(monkeypatch, outcomes):
+    """Replace processing with a scripted result per filename."""
+    from call_transcriber import __main__ as cli, pipeline as pl
+
+    seen = []
+
+    def fake(path, cfg, ui=None):
+        seen.append(path.name)
+        outcome = outcomes[path.name]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return pl.Result(
+            folder=None, work_order=outcome, transcript="t", extracted={},
+        )
+
+    monkeypatch.setattr(cli.pipeline, "process_file", fake)
+    return seen
+
+
+def test_every_recording_in_the_folder_is_processed(tmp_path, monkeypatch, capsys):
+    from call_transcriber import __main__ as cli, config
+
+    for name in ("b.wav", "a.wav", "c.mp3"):
+        (tmp_path / name).write_bytes(b"")
+    seen = _stub_batch(monkeypatch, {n: f"ORDER {n}" for n in ("a.wav", "b.wav", "c.mp3")})
+
+    assert cli._cmd_test(config.load(root=tmp_path), tmp_path) == 0
+    assert seen == ["a.wav", "b.wav", "c.mp3"], "processed out of order"
+    assert "3 of 3 processed" in capsys.readouterr().out
+
+
+def test_one_bad_recording_does_not_stop_the_rest(tmp_path, monkeypatch, capsys):
+    """Twenty calls in, failing the batch on the fifth would waste the lot."""
+    from call_transcriber import __main__ as cli, config
+
+    for name in ("a.wav", "b.wav", "c.wav"):
+        (tmp_path / name).write_bytes(b"")
+    _stub_batch(monkeypatch, {
+        "a.wav": "ORDER a",
+        "b.wav": RuntimeError("corrupt"),
+        "c.wav": "ORDER c",
+    })
+
+    assert cli._cmd_test(config.load(root=tmp_path), tmp_path) == 1
+    out = capsys.readouterr().out
+    assert "ORDER a" in out and "ORDER c" in out
+    assert "1 failed" in out
+
+
+def test_files_that_are_not_recordings_are_ignored(tmp_path, monkeypatch):
+    from call_transcriber import __main__ as cli, config
+
+    (tmp_path / "call.wav").write_bytes(b"")
+    (tmp_path / "notes.txt").write_text("not audio")
+    (tmp_path / "config.toml").write_text("")
+    seen = _stub_batch(monkeypatch, {"call.wav": "ORDER"})
+
+    cli._cmd_test(config.load(root=tmp_path), tmp_path)
+
+    assert seen == ["call.wav"]
+
+
+def test_an_empty_folder_says_what_it_was_looking_for(tmp_path, capsys):
+    from call_transcriber import __main__ as cli, config
+
+    assert cli._cmd_test(config.load(root=tmp_path), tmp_path) == 1
+    assert ".wav" in capsys.readouterr().out

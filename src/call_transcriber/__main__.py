@@ -104,8 +104,8 @@ def _parser() -> argparse.ArgumentParser:
     levels.add_argument(
         "--seconds", type=int, default=45, help="how long to listen (default 45)"
     )
-    test = sub.add_parser("test", help="process an existing audio file")
-    test.add_argument("file", help="path to a .wav/.mp3/.m4a recording")
+    test = sub.add_parser("test", help="process an existing recording, or a folder of them")
+    test.add_argument("file", help="a .wav/.mp3/.m4a recording, or a folder of them")
     compare = sub.add_parser(
         "compare", help="run one recording through several extraction models"
     )
@@ -561,7 +561,17 @@ def _cmd_doctor(cfg) -> int:
     # would pass right up until the first call, which is the worst place to
     # discover a half-finished install.
     print("\nSpeech engine")
-    from . import transcribe
+    from . import accel, transcribe
+
+    if cfg.transcribe.engine == "parakeet":
+        print(f"  [--] parakeet will run on the {accel.describe(cfg.transcribe.provider)}")
+    else:
+        device = cfg.transcribe.device
+        print(
+            f"  [--] whisper will run on {device}"
+            f" as {transcribe._compute_type(cfg.transcribe, device)}"
+        )
+
 
     if cfg.transcribe.engine == "parakeet":
         try:
@@ -594,6 +604,7 @@ def _cmd_doctor(cfg) -> int:
     else:
         from . import diarize
 
+        print(f"  [--] speaker labelling will run on the {accel.describe(cfg.diarize.provider)}")
         try:
             diarize.load(cfg.diarize, cfg.root)
             check(f"diarization loads, expecting {cfg.diarize.speakers} speakers", True)
@@ -652,10 +663,15 @@ def _cmd_doctor(cfg) -> int:
     return 0 if ok else 1
 
 
+AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".flac", ".ogg")
+
+
 def _cmd_test(cfg, path: Path) -> int:
     if not path.exists():
         print(f"error: {path} does not exist")
         return 1
+    if path.is_dir():
+        return _cmd_test_folder(cfg, path)
 
     ui = notify.make_ui(cfg.output.show_popup)
     stop = threading.Event()
@@ -683,6 +699,56 @@ def _cmd_test(cfg, path: Path) -> int:
     if result.folder:
         print(f"saved to {result.folder}")
     return 0
+
+
+def _cmd_test_folder(cfg, folder: Path) -> int:
+    """Work through a folder of recordings, one after another.
+
+    For testing against real calls without waiting for the phone to ring. The
+    popup is suppressed: twenty windows appearing over an hour is not a
+    feature, and the work orders are all on disk anyway.
+    """
+    import time as _time
+
+    recordings = sorted(
+        p for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES
+    )
+    if not recordings:
+        print(f"error: no recordings in {folder}")
+        print(f"  Looking for: {', '.join(AUDIO_SUFFIXES)}")
+        return 1
+
+    print(f"{len(recordings)} recording(s) in {folder}\n")
+    ui = notify.make_ui(False)
+    failures = 0
+    started_all = _time.monotonic()
+
+    for index, recording in enumerate(recordings, 1):
+        print("=" * 72)
+        print(f"  [{index}/{len(recordings)}] {recording.name}")
+        print("=" * 72)
+        started = _time.monotonic()
+        try:
+            result = pipeline.process_file(recording, cfg, ui=ui)
+        except Exception as exc:
+            logging.exception("failed on %s", recording.name)
+            print(f"  failed: {exc}\n")
+            failures += 1
+            continue
+
+        print(result.work_order)
+        print(f"  {_time.monotonic() - started:.0f}s", end="")
+        print(f", saved to {result.folder}" if result.folder else "")
+        print()
+
+    done = len(recordings) - failures
+    print("=" * 72)
+    print(f"  {done} of {len(recordings)} processed in "
+          f"{(_time.monotonic() - started_all) / 60:.1f} minutes")
+    if failures:
+        print(f"  {failures} failed -- see call-transcriber.log")
+    return 1 if failures else 0
 
 
 def _cmd_levels(cfg, seconds: int) -> int:

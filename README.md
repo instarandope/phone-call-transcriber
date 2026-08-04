@@ -44,6 +44,11 @@ STILL NEEDED
 Everything runs locally. No audio, no transcript and no customer detail is sent
 anywhere — there is no account, no API key and no cloud service involved.
 
+**Running it across two machines, or on a GPU?** See
+[PLATFORMS.md](PLATFORMS.md) — which parts run where, what accelerates on
+which hardware, and how to test against a folder of recordings without a phone
+attached.
+
 ## What touches the network, exactly
 
 You can check this yourself: `grep -rn "urlopen\|requests\." src/`. There are

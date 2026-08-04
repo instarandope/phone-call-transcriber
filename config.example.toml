@@ -129,6 +129,17 @@ engine = "whisper"
 # Where the parakeet model lives. Blank means models/parakeet next to this file.
 parakeet_dir = ""
 
+# Where parakeet runs: cpu, cuda (NVIDIA), coreml (Apple Silicon), or auto.
+#
+# Anything chosen automatically falls back to the CPU rather than failing --
+# a graphics driver without the runtime libraries behind it is the normal
+# state of a machine nobody set up for GPU work.
+#
+# Note that sherpa-onnx from PyPI is a CPU-only build. "cuda" needs the GPU
+# build from the k2-fsa index; without it this quietly runs on the CPU and
+# says so in the log. doctor.bat prints where it will actually run.
+provider = "auto"
+
 # How many windows parakeet decodes at once. This is a memory setting, not a
 # speed one. sherpa-onnx holds the encoder activations for every window in a
 # batch -- roughly 175 MB each -- so handing it a whole call needed 7.6 GB for
@@ -191,6 +202,9 @@ embedding_model = ""
 # outright removes the part of the problem diarizers are worst at, which is
 # working out how many voices there are. Set to -1 to let it decide.
 speakers = 2
+
+# cpu, cuda, coreml or auto -- as under [transcribe] above.
+provider = "auto"
 
 num_threads = 4
 

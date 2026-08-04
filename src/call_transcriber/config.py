@@ -55,6 +55,11 @@ class TranscribeConfig:
     #             model. Needs `run.bat models --parakeet` first.
     engine: str = "whisper"
     parakeet_dir: str = ""
+    # Where parakeet runs: cpu, cuda (NVIDIA), or coreml (Apple Silicon).
+    # "auto" picks the best one this machine actually has, and falls back to
+    # the CPU rather than failing if the accelerator turns out to be a driver
+    # without the libraries behind it.
+    provider: str = "auto"
     num_threads: int = 4
     # How many windows parakeet decodes at once. Memory, not speed, sets this:
     # sherpa-onnx keeps the encoder activations for every window in a batch,
@@ -92,6 +97,7 @@ class DiarizeConfig:
     # A phone call is two people. Saying so outright removes the part of
     # diarization that goes wrong most.
     speakers: int = 2
+    provider: str = "auto"  # cpu | cuda | coreml | auto
     num_threads: int = 4
     min_speech_s: float = 0.3
     min_silence_s: float = 0.5
@@ -328,6 +334,8 @@ def _previous_config(root: Path) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
+PROVIDERS = frozenset({"auto", "cpu", "cuda", "coreml"})
+
 LOOPBACK_NAMES = {"localhost", "ip6-localhost", "ip6-loopback"}
 
 
@@ -422,6 +430,18 @@ def _validate(cfg: Config) -> Config:
                 f"the slow work -- but it is not the default, so say so on "
                 f"purpose: set allow_lan = true under [extract]."
             )
+
+    for label, chosen in (
+        ("transcribe.provider", cfg.transcribe.provider),
+        ("diarize.provider", cfg.diarize.provider),
+    ):
+        if chosen not in PROVIDERS:
+            cfg.warnings.append(
+                f"{label} {chosen!r} is not one of {', '.join(sorted(PROVIDERS))}"
+                f" -- using auto"
+            )
+            section, _, key = label.partition(".")
+            setattr(getattr(cfg, section), key, "auto")
 
     if cfg.transcribe.engine not in ("whisper", "parakeet"):
         cfg.warnings.append(

@@ -71,15 +71,38 @@ def load(cfg, root: Path):
                 f"Run:  run.bat models --diarize"
             )
 
+    from . import accel
+
+    provider = accel.resolve(getattr(cfg, "provider", "auto"))
+    try:
+        return _diarizer(sherpa_onnx, segmentation, embedding, cfg, provider)
+    except DiarizationError:
+        raise
+    except Exception as exc:
+        if provider == "cpu":
+            raise
+        # Same rule as everywhere else here: an accelerator that is present is
+        # not an accelerator that works, and speaker labels are worth more than
+        # insisting on the fast path.
+        log.warning(
+            "could not use the %s provider for diarization (%s) -- using the CPU",
+            provider, exc,
+        )
+        return _diarizer(sherpa_onnx, segmentation, embedding, cfg, "cpu")
+
+
+def _diarizer(sherpa_onnx, segmentation: Path, embedding: Path, cfg, provider: str):
+    log.info("loading diarization models on %s", provider)
     settings = sherpa_onnx.OfflineSpeakerDiarizationConfig(
         segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
             pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
                 model=str(segmentation)
             ),
             num_threads=cfg.num_threads,
+            provider=provider,
         ),
         embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-            model=str(embedding), num_threads=cfg.num_threads
+            model=str(embedding), num_threads=cfg.num_threads, provider=provider
         ),
         # A phone call is two people. Saying so removes the part of the problem
         # that diarizers are worst at.
