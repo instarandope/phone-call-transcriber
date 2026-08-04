@@ -15,6 +15,30 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
+REM Present is not the same as runnable. Antivirus quarantines Python
+REM interpreters fairly often -- a copied .exe that captures audio,
+REM downloads models and loads native libraries reads like malware to a
+REM heuristic scanner -- and the symptom is a bare "Access is denied", or
+REM commands that simply do nothing. Neither says what to do about it.
+".venv\Scripts\python.exe" -c "pass" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo   Windows will not run .venv\Scripts\python.exe
+    echo.
+    echo   The file is there, but it cannot be launched. Almost always this
+    echo   is antivirus having quarantined it, or a policy that blocks
+    echo   programs from running on this drive.
+    echo.
+    echo     1. Check your antivirus protection history for python.exe
+    echo     2. Restore it and add this folder as an exclusion,
+    echo        or delete the .venv folder and run install.bat again
+    echo     3. If this folder is on a USB or external drive, try it
+    echo        from C:\ instead
+    echo.
+    pause
+    exit /b 1
+)
+
 set PYTHONPATH=%~dp0src
 REM -u keeps stdout unbuffered. A C library that crashes takes the
 REM interpreter with it, and anything still sitting in the buffer dies
