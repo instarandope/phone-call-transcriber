@@ -77,44 +77,70 @@ def load_model(cfg):
                 "faster-whisper is not installed. Re-run install.bat."
             ) from exc
 
-        log.info("loading whisper model %s (%s, %s)", cfg.model, cfg.device, cfg.compute_type)
-        try:
-            _model = WhisperModel(cfg.model, device=cfg.device, compute_type=cfg.compute_type)
-        except Exception as exc:
-            # "auto" on a PC with an NVIDIA driver picks CUDA, and then fails
-            # here if the CUDA runtime DLLs are not installed too -- which on a
-            # machine nobody set up for GPU work is the normal state. That is a
-            # missing library, not a missing model, so the right answer is the
-            # CPU rather than an error message.
-            if cfg.device != "cpu" and _looks_like_missing_gpu_runtime(exc):
-                log.warning(
-                    "the GPU cannot be used (%s) -- using the CPU instead. Set "
-                    "device = \"cpu\" in [transcribe] to stop trying.", exc,
-                )
-                try:
-                    _model = WhisperModel(cfg.model, device="cpu", compute_type=cfg.compute_type)
-                    _model_key = key
-                    return _model
-                except Exception as cpu_exc:
-                    exc = cpu_exc
-            # Nearly always either a bad model name or a compute_type the CPU
-            # can't do; both are config problems worth naming explicitly.
-            raise RuntimeError(
-                f"could not load whisper model {cfg.model!r} with compute_type "
-                f"{cfg.compute_type!r}: {exc}\n"
-                "Check [transcribe] in config.toml -- 'small.en' with 'int8' works on any CPU."
-            ) from exc
-        _model_key = key
-        return _model
+        wanted = (cfg.device or "auto").lower()
+        # "auto" on a PC with an NVIDIA driver picks the GPU, and the CUDA
+        # runtime libraries it then needs are part of the CUDA toolkit rather
+        # than the driver. A machine nobody set up for GPU work therefore ends
+        # up choosing a GPU it cannot use. That is a missing library, not a
+        # missing model, so the answer is the CPU rather than an error.
+        candidates = ["cpu"] if wanted == "cpu" else [wanted, "cpu"]
+
+        for attempt, device in enumerate(candidates):
+            log.info("loading whisper model %s (%s, %s)", cfg.model, device, cfg.compute_type)
+            try:
+                model = WhisperModel(cfg.model, device=device, compute_type=cfg.compute_type)
+                _wake_up(model)
+            except Exception as exc:
+                last = attempt == len(candidates) - 1
+                if not last and _looks_like_missing_gpu_runtime(exc):
+                    log.warning(
+                        "the GPU cannot be used (%s) -- falling back to the CPU. "
+                        'Set device = "cpu" under [transcribe] to stop trying.', exc,
+                    )
+                    continue
+                # Nearly always either a bad model name or a compute_type the
+                # CPU can't do; both are config problems worth naming.
+                raise RuntimeError(
+                    f"could not load whisper model {cfg.model!r} with compute_type "
+                    f"{cfg.compute_type!r}: {exc}\n"
+                    "Check [transcribe] in config.toml -- 'small.en' with 'int8' "
+                    "works on any CPU."
+                ) from exc
+            _model, _model_key = model, key
+            return model
+
+
+def _wake_up(model) -> None:
+    """Run a scrap of audio through the model, so a broken device fails here.
+
+    Without this the fallback above cannot work. `WhisperModel.transcribe`
+    returns a generator and does no arithmetic until it is iterated, and
+    ctranslate2 loads the CUDA libraries at that first computation -- so a
+    missing cuBLAS surfaces deep inside the caller's loop, long after the last
+    place equipped to do anything about it. That is how "Library
+    cublas64_12.dll is not found or cannot be loaded" reached a user as a bare
+    unexplained failure.
+
+    Skipped entirely on the CPU, where there is no such library to be missing
+    and the second or two would be pure waste.
+    """
+    if getattr(getattr(model, "model", None), "device", "cpu") == "cpu":
+        return
+
+    segments, _info = model.transcribe(
+        np.zeros(16000, dtype=np.float32), language="en", beam_size=1, vad_filter=False
+    )
+    for _ in segments:  # one item is enough to force the encoder to run
+        break
 
 
 def _looks_like_missing_gpu_runtime(exc: Exception) -> bool:
     """A CUDA stack that is present enough to be chosen but too broken to run.
 
-    The give-away strings cover ctranslate2's failures on a machine with an
-    NVIDIA driver but no CUDA toolkit: the cuBLAS/cuDNN DLLs it needs are not
-    part of the driver, so `device="auto"` selects a GPU it cannot actually
-    use ("Library cublas64_12.dll is not found or cannot be loaded").
+    These strings cover ctranslate2's failures on a machine with an NVIDIA
+    driver but no CUDA toolkit: the cuBLAS and cuDNN libraries it wants are
+    not part of the driver, so `device="auto"` selects a GPU that cannot
+    actually compute anything.
     """
     text = str(exc).lower()
     return any(mark in text for mark in ("cublas", "cudnn", "cuda", "zlibwapi"))

@@ -97,16 +97,40 @@ def tcfg(**overrides):
 # fix is the CPU, not an error message.
 
 
-def _gpu_fallback_setup(monkeypatch, error_message, cpu_ok=True):
+def _gpu_fallback_setup(monkeypatch, error_message, cpu_ok=True, fail_lazily=True):
+    """Fake faster-whisper that fails the way the real one does.
+
+    `fail_lazily` reproduces the detail that made the first attempt at this
+    fix useless: transcribe() returns a generator and the GPU library is not
+    loaded until it is iterated, so constructing the model succeeds and the
+    failure arrives later.
+    """
     attempts = []
+
+    class FakeCT2:
+        def __init__(self, device):
+            self.device = "cuda" if device in ("auto", "cuda") else "cpu"
 
     class FakeWhisperModel:
         def __init__(self, model, device="auto", compute_type="int8"):
             attempts.append(device)
-            if device != "cpu":
-                raise RuntimeError(error_message)
-            if not cpu_ok:
+            self.model = FakeCT2(device)
+            on_gpu = self.model.device != "cpu"
+            # A broken CPU can only ever fail at construction: the wake-up
+            # probe is deliberately skipped there, so there is no later moment
+            # inside load_model for it to go wrong.
+            if not on_gpu and not cpu_ok:
                 raise RuntimeError("cpu is broken too")
+            self._broken = on_gpu
+            if self._broken and not fail_lazily:
+                raise RuntimeError(error_message)
+
+        def transcribe(self, audio, **kwargs):
+            def generate():
+                if self._broken:
+                    raise RuntimeError(error_message)
+                yield None
+            return generate(), None
 
     import types
 
@@ -119,8 +143,19 @@ def _gpu_fallback_setup(monkeypatch, error_message, cpu_ok=True):
 
 
 def test_a_missing_cuda_runtime_falls_back_to_the_cpu(monkeypatch):
+    """The real failure: the model constructs fine and dies on first use."""
     attempts = _gpu_fallback_setup(
         monkeypatch, "Library cublas64_12.dll is not found or cannot be loaded"
+    )
+
+    transcribe.load_model(tcfg())
+
+    assert attempts == ["auto", "cpu"]
+
+
+def test_it_also_falls_back_when_the_constructor_is_the_thing_that_fails(monkeypatch):
+    attempts = _gpu_fallback_setup(
+        monkeypatch, "Library cublas64_12.dll is not found", fail_lazily=False
     )
 
     transcribe.load_model(tcfg())
@@ -138,7 +173,9 @@ def test_a_missing_cudnn_falls_back_too(monkeypatch):
 
 def test_an_ordinary_load_failure_is_still_an_error(monkeypatch):
     """A bad model name must not be retried on the CPU and then blamed on it."""
-    attempts = _gpu_fallback_setup(monkeypatch, "Invalid model size 'basee.en'")
+    attempts = _gpu_fallback_setup(
+        monkeypatch, "Invalid model size 'basee.en'", fail_lazily=False
+    )
 
     with pytest.raises(RuntimeError, match="could not load whisper model"):
         transcribe.load_model(tcfg(model="basee.en"))
@@ -146,7 +183,7 @@ def test_an_ordinary_load_failure_is_still_an_error(monkeypatch):
     assert attempts == ["auto"]
 
 
-def test_asking_for_cpu_outright_never_retries(monkeypatch):
+def test_asking_for_cpu_outright_never_touches_a_gpu(monkeypatch):
     attempts = _gpu_fallback_setup(monkeypatch, "irrelevant", cpu_ok=False)
 
     with pytest.raises(RuntimeError):
@@ -160,3 +197,31 @@ def test_a_broken_cpu_after_a_broken_gpu_reports_the_cpu_error(monkeypatch):
 
     with pytest.raises(RuntimeError, match="cpu is broken too"):
         transcribe.load_model(tcfg())
+
+
+def test_the_cpu_is_not_woken_up_needlessly(monkeypatch):
+    """The probe costs a second or two and only earns it on a GPU."""
+    woken = []
+
+    class FakeCT2:
+        device = "cpu"
+
+    class FakeWhisperModel:
+        def __init__(self, model, device="auto", compute_type="int8"):
+            self.model = FakeCT2()
+
+        def transcribe(self, audio, **kwargs):
+            woken.append(True)
+            return iter(()), None
+
+    import types
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = FakeWhisperModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(transcribe, "_model", None)
+    monkeypatch.setattr(transcribe, "_model_key", None)
+
+    transcribe.load_model(tcfg())
+
+    assert woken == []
