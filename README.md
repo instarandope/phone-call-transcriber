@@ -742,6 +742,39 @@ tech to the wrong house.
 For speech, `small.en` → `medium.en` roughly triples transcription time. Check
 `processing_s` in `extracted.json` before and after.
 
+### Should the model reason first?
+
+`think = false` is the shipped setting, and the instinct that reasoning must
+help is worth taking apart, because half of it is already solved and the other
+half is genuinely open.
+
+**It cannot help with the format.** Ollama's structured-output mode constrains
+decoding to the schema in `fields.py` — the model is not asked to produce
+valid JSON with the right keys, it is prevented from producing anything else.
+That guarantee holds whether it reasons or not, so there is nothing there for
+thinking to improve.
+
+**It might help with the judgement calls**, which are real: which of three
+offered times was actually agreed, whether a number was a quote or a budget,
+which speaker is the customer. Those are inference rather than copying, and
+inference is what reasoning is for.
+
+Set against that, two costs. Thinking multiplies output tokens on a CPU that
+already takes minutes per call — a long call can run past `timeout_s` and
+return nothing at all. And the extraction prompt is deliberately hostile to
+invention, because a confidently wrong address sends a technician to the wrong
+house; a model given room to reason is a model given room to talk itself into
+a plausible guess.
+
+So measure it on a call you know the answer to, rather than arguing:
+
+```
+run.bat compare somecall.wav --models gemma4:e4b,gemma4:e4b+think
+```
+
+Read both work orders against the transcript. If reasoning does not fix
+something that was wrong, it is costing you minutes for nothing.
+
 ## Long calls
 
 An eleven-minute call is around 9,000 characters of transcript, and a capable

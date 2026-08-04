@@ -113,7 +113,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     compare.add_argument(
         "--models",
-        help="comma-separated Ollama models to compare, e.g. gemma3:4b,gemma4:e4b",
+        help="comma-separated Ollama models to compare, e.g. gemma3:4b,gemma4:e4b. "
+        "Suffix a model with +think or +nothink to compare reasoning on and off, "
+        "e.g. gemma4:e4b,gemma4:e4b+think",
     )
     compare.add_argument(
         "--engines",
@@ -836,13 +838,12 @@ def _cmd_compare(cfg, path: Path | None, models: str | None, engines: str | None
         return 0
 
     scored = []
-    for model in wanted:
+    for spec in wanted:
+        settings, label = _parse_extract_model(spec, cfg)
         print("=" * 72)
-        print(f"  {model}")
+        print(f"  {label}")
         print("=" * 72)
 
-        settings = copy.copy(cfg.extract)
-        settings.model = model
         started = _time.monotonic()
         try:
             data = extract.extract(transcript_text, settings, cfg.business)
@@ -856,19 +857,44 @@ def _cmd_compare(cfg, path: Path | None, models: str | None, engines: str | None
             1 for f in fields_with_values(data)
         )
         print(f"  {elapsed:.0f}s, {filled} fields filled\n")
-        scored.append((model, elapsed, filled))
+        scored.append((label, elapsed, filled))
 
     if len(scored) > 1:
         print("=" * 72)
-        print(f"  {'model':<24} {'seconds':>9} {'fields':>8}")
+        print(f"  {'model':<28} {'seconds':>9} {'fields':>8}")
         print("-" * 72)
-        for model, elapsed, filled in scored:
-            print(f"  {model:<24} {elapsed:>9.0f} {filled:>8}")
+        for label, elapsed, filled in scored:
+            print(f"  {label:<28} {elapsed:>9.0f} {filled:>8}")
         print()
         print("  More fields filled is not automatically better -- a model that")
         print("  invents an address scores well here and sends a tech to the wrong")
         print("  house. Read the work orders above against the transcript.")
     return 0
+
+
+def _parse_extract_model(spec: str, cfg):
+    """'gemma4:e4b', or 'gemma4:e4b+think' to turn reasoning on for that run.
+
+    Ollama model names are `name:tag`, and a tag may not contain '+', so the
+    suffix cannot collide with a real name.
+    """
+    import copy
+
+    settings = copy.copy(cfg.extract)
+    name, sep, flag = spec.partition("+")
+    settings.model = name.strip()
+
+    label = settings.model
+    if sep:
+        flag = flag.strip().lower()
+        if flag not in ("think", "nothink"):
+            raise SystemExit(
+                f"error: unknown suffix '+{flag}' on {spec!r}. "
+                "Use +think or +nothink."
+            )
+        settings.think = flag == "think"
+        label = f"{settings.model} +{flag}"
+    return settings, label
 
 
 def _engine_label(settings) -> str:

@@ -412,3 +412,64 @@ def test_the_appointment_field_asks_for_the_final_agreed_time():
     prompt = fields.BY_NAME["appointment"].prompt
     assert "LAST time both sides accepted" in prompt
     assert "not the first one mentioned" in prompt
+
+
+# -- comparing reasoning on and off ------------------------------------------
+#
+# "Surely reasoning helps it understand the format" -- it cannot, because
+# Ollama's structured output constrains decoding to the schema whether the
+# model reasons or not. Whether it helps the *judgement* calls is a real
+# question, and the only honest way to answer it is to measure both on one
+# call. Ollama tags are name:tag and may not contain '+', so the suffix
+# cannot collide with a real model name.
+
+
+def _spec(name, tmp_path):
+    from call_transcriber import __main__ as cli, config
+
+    return cli._parse_extract_model(name, config.load(root=tmp_path))
+
+
+def test_a_plain_name_leaves_the_configured_setting_alone(tmp_path):
+    settings, label = _spec("gemma4:e4b", tmp_path)
+
+    assert settings.model == "gemma4:e4b"
+    assert settings.think is False  # the shipped default
+    assert label == "gemma4:e4b"
+
+
+def test_think_can_be_turned_on_for_one_run(tmp_path):
+    settings, label = _spec("gemma4:e4b+think", tmp_path)
+
+    assert settings.model == "gemma4:e4b"
+    assert settings.think is True
+    assert label == "gemma4:e4b +think"
+
+
+def test_think_can_be_turned_off_for_one_run(tmp_path):
+    from call_transcriber import __main__ as cli, config
+
+    cfg = config.load(root=tmp_path)
+    cfg.extract.think = True
+    settings, _ = cli._parse_extract_model("gemma4:e4b+nothink", cfg)
+
+    assert settings.think is False
+
+
+def test_the_tag_colon_is_not_mistaken_for_the_suffix(tmp_path):
+    settings, _ = _spec("qwen3:30b-a3b", tmp_path)
+
+    assert settings.model == "qwen3:30b-a3b"
+
+
+def test_a_typo_in_the_suffix_says_so_rather_than_being_ignored(tmp_path):
+    with pytest.raises(SystemExit, match="thinking"):
+        _spec("gemma4:e4b+thinking", tmp_path)
+
+
+def test_comparing_a_model_with_itself_does_not_share_settings(tmp_path):
+    """Both entries must not end up pointing at one mutated config."""
+    off, _ = _spec("gemma4:e4b+nothink", tmp_path)
+    on, _ = _spec("gemma4:e4b+think", tmp_path)
+
+    assert off.think is False and on.think is True
