@@ -316,3 +316,90 @@ def test_a_nonsense_batch_size_still_decodes(monkeypatch):
 
     assert recognizer.high_water == 1
     assert segments
+
+
+# -- quiet audio must not vanish -------------------------------------------
+#
+# Parakeet has a cliff, not a slope: below about -20 dBFS peak it stops
+# returning words and starts returning nothing at all. Measured on a real
+# call -- 0 of 22 windows empty at -20 dBFS, 9 of 21 at -30, 19 of 21 at -40.
+# A quiet far end on a phone line is normal, and losing whole windows of it
+# silently is how an appointment time disappears from a work order.
+
+
+def test_a_quiet_window_is_lifted_to_something_audible():
+    # -35 dBFS or so: well under the cliff, but within reach of the gain cap.
+    quiet = (speech(2) * 0.05).astype(np.float32)
+    assert np.abs(quiet).max() < 0.02, "the fixture itself must be quiet"
+
+    lifted = transcribe._audible(quiet)
+
+    assert np.abs(lifted).max() == pytest.approx(transcribe.PARAKEET_TARGET_PEAK, abs=0.01)
+
+
+def test_audio_already_at_a_sane_level_is_untouched():
+    """No change at all for recordings that already work."""
+    loud = speech(2).astype(np.float32)
+    loud = loud / np.abs(loud).max() * 0.95
+
+    assert np.array_equal(transcribe._audible(loud), loud)
+
+
+def test_the_boost_is_bounded():
+    """Near-silence must not be multiplied into a wall of amplified hiss."""
+    almost_nothing = (speech(2) * 1e-6).astype(np.float32)
+
+    lifted = transcribe._audible(almost_nothing)
+    gain = np.abs(lifted).max() / np.abs(almost_nothing).max()
+
+    assert gain <= transcribe.PARAKEET_MAX_GAIN + 1e-6
+
+
+def test_digital_silence_does_not_divide_by_zero():
+    assert np.array_equal(
+        transcribe._audible(np.zeros(1600, dtype=np.float32)),
+        np.zeros(1600, dtype=np.float32),
+    )
+
+
+def test_the_shape_of_the_signal_is_preserved():
+    """Pure gain. Filtering and denoising measurably hurt; scaling does not,
+    and that difference is the whole reason this is safe."""
+    quiet = (speech(2) * 0.02).astype(np.float32)
+
+    lifted = transcribe._audible(quiet)
+    ratio = lifted[np.abs(quiet) > 1e-9] / quiet[np.abs(quiet) > 1e-9]
+
+    assert np.allclose(ratio, ratio[0], rtol=1e-4)
+
+
+def test_every_window_reaches_parakeet_audible(monkeypatch):
+    """The levelling must happen per window, not per call -- one loud stretch
+    would otherwise mask a quiet one and leave it below the cliff."""
+    pytest.importorskip("webrtcvad")
+    seen = []
+
+    class _Recorder:
+        def create_stream(self):
+            outer = self
+
+            class S:
+                def accept_waveform(self, rate, data):
+                    seen.append(float(np.abs(data).max()))
+
+                result = type("R", (), {"text": "words"})()
+
+            return S()
+
+        def decode_streams(self, streams):
+            pass
+
+    monkeypatch.setattr(transcribe, "load_parakeet", lambda cfg, root: _Recorder())
+    from pathlib import Path as P
+
+    loud = speech(40)
+    loud[: 16000 * 20] *= 0.005  # first half far quieter than the second
+    transcribe._run_parakeet(loud, tcfg(engine="parakeet"), P("."))
+
+    assert seen, "no windows reached the engine"
+    assert min(seen) > 0.1, f"a window arrived at {min(seen):.4f} peak, under the cliff"

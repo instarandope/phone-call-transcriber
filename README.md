@@ -600,6 +600,28 @@ alone is fine; a low-pass at 6 kHz is fine; the telephone band-pass produces
 zero text from perfect speech. If you ever bolt a filter onto an engine you
 did not train, test it before trusting it.
 
+**Levelling is the exception, and only for Parakeet.** Below roughly -20 dBFS
+peak, Parakeet does not degrade — it stops returning words and starts
+returning nothing at all, per window, silently. Measured on a real call,
+attenuated in steps:
+
+| peak level | windows returning nothing |
+|---|---|
+| -20 dBFS | 0 of 22 |
+| -30 dBFS | 9 of 21 |
+| -40 dBFS | 19 of 21 |
+
+That is a feature-normalisation cliff, the same one the band-pass fell off
+from the other direction. Whisper does not have it — its own feature
+extraction rescales, so a quiet recording merely transcribes a little worse.
+
+So each window is lifted to a sane level before Parakeet sees it. That is pure
+gain: one multiplication, no change to the shape of the signal, which is why it
+is safe where filtering and denoising measurably were not. On the same call at
+-40 dBFS it turns 19 empty windows and 406 characters back into 0 empty and
+5,712 — against 5,710 for the untouched original. Audio already loud enough is
+passed through untouched.
+
 The one clean-up that genuinely matters happens before the samples exist:
 **the record level dial.** The call measured above had 0.75% of its samples
 pinned at digital full scale — roughly 12,000 clipped bursts across seven

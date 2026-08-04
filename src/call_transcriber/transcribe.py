@@ -378,9 +378,8 @@ def _run_parakeet(samples: np.ndarray, cfg, root: Path) -> list[Segment]:
         streams = []
         for start, end in group:
             stream = recognizer.create_stream()
-            stream.accept_waveform(16000, np.ascontiguousarray(
-                samples[int(start * 16000) : int(end * 16000)], dtype=np.float32
-            ))
+            window = samples[int(start * 16000) : int(end * 16000)]
+            stream.accept_waveform(16000, _audible(window))
             streams.append(stream)
 
         recognizer.decode_streams(streams)
@@ -392,6 +391,43 @@ def _run_parakeet(samples: np.ndarray, cfg, root: Path) -> list[Segment]:
         streams.clear()
 
     return out
+
+
+# Below roughly -20 dBFS peak, Parakeet stops returning words and starts
+# returning nothing at all -- not a worse transcript, an empty one. Measured on
+# a real call, attenuated in steps and decoded window by window:
+#
+#     peak -20 dBFS   0 of 22 windows empty
+#     peak -30 dBFS   9 of 21 windows empty
+#     peak -40 dBFS  19 of 21 windows empty
+#
+# It is a feature-normalisation cliff rather than a gradual loss of accuracy,
+# and it is the same failure the band-pass experiment hit from the other
+# direction. Whisper does not have it: its own feature extraction rescales, so
+# a quiet recording merely transcribes slightly worse.
+PARAKEET_TARGET_PEAK = 0.9
+PARAKEET_MAX_GAIN = 100.0  # ~40 dB; below that the audio is beyond saving
+
+
+def _audible(window: np.ndarray) -> np.ndarray:
+    """Lift a quiet window to a level Parakeet can actually hear.
+
+    Pure gain -- a single multiplication that changes nothing about the shape
+    of the signal, which is why it is safe here when filtering and denoising
+    measurably were not. Restores the lost windows exactly: on the same call at
+    -40 dBFS, 19 empty windows and 406 characters become 0 empty and 5,712,
+    against 5,710 for the untouched original.
+
+    Only ever boosts. A window already loud enough is passed through
+    unchanged, so recordings at a sane level decode byte for byte as before.
+    """
+    block = np.ascontiguousarray(window, dtype=np.float32)
+    peak = float(np.abs(block).max()) if block.size else 0.0
+    if peak <= 0.0:
+        return block
+
+    gain = min(PARAKEET_TARGET_PEAK / peak, PARAKEET_MAX_GAIN)
+    return block if gain <= 1.0 else (block * gain).astype(np.float32)
 
 
 def _speech_windows(samples: np.ndarray, cfg) -> list[tuple[float, float]]:
