@@ -100,6 +100,11 @@ class DiarizeConfig:
 @dataclass
 class ExtractConfig:
     base_url: str = "http://127.0.0.1:11434"
+    # Permission to send transcripts to another machine on your own network --
+    # a spare PC or a Mac mini doing the slow work, which is a sensible thing
+    # to want and not something to happen by accident. It does NOT permit an
+    # address on the public internet; nothing does.
+    allow_lan: bool = False
     model: str = "gemma4:e4b"
     # Reasoning models spend tokens thinking before answering. For filling in a
     # fixed schema from a transcript there is nothing to reason about, and on a
@@ -346,6 +351,27 @@ def is_local(url: str) -> bool:
         return False
 
 
+def is_private_network(url: str) -> bool:
+    """Is this an address on a network you control, rather than the internet?
+
+    The distinction the safety check needs. Loopback is beyond doubt, and a
+    public address is beyond argument. Between them sits the case of a second
+    machine in the same building, which is a normal way to run this and a
+    genuinely different question from sending call transcripts to a company
+    nobody chose.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        # A hostname rather than an address. It may well resolve to the
+        # machine next door, but nothing here can tell -- so do not claim to.
+        return False
+    return (address.is_private or address.is_link_local) and not address.is_loopback
+
+
 def _validate(cfg: Config) -> Config:
     """Clamp values that would crash a downstream library if passed through."""
     if not 0 <= cfg.detect.vad_aggressiveness <= 3:
@@ -381,12 +407,21 @@ def _validate(cfg: Config) -> Config:
         cfg.detect.line_dead_dbfs = corrected
 
     if not is_local(cfg.extract.base_url):
-        cfg.warnings.append(
-            f"extract.base_url points at {cfg.extract.base_url}, which is NOT this "
-            f"machine. Every call transcript -- names, addresses, phone numbers -- "
-            f"would be sent there. Set it back to http://127.0.0.1:11434 unless you "
-            f"genuinely intend that."
-        )
+        where = cfg.extract.base_url
+        if not is_private_network(where):
+            cfg.warnings.append(
+                f"extract.base_url points at {where}, which is on the public "
+                f"internet. Every call transcript -- names, addresses, phone "
+                f"numbers -- would be sent there. Set it back to "
+                f"http://127.0.0.1:11434 unless you genuinely intend that."
+            )
+        elif not cfg.extract.allow_lan:
+            cfg.warnings.append(
+                f"extract.base_url points at {where}, another machine on your "
+                f"network. That is a reasonable thing to want -- a spare PC doing "
+                f"the slow work -- but it is not the default, so say so on "
+                f"purpose: set allow_lan = true under [extract]."
+            )
 
     if cfg.transcribe.engine not in ("whisper", "parakeet"):
         cfg.warnings.append(

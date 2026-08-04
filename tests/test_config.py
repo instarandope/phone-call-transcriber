@@ -145,14 +145,55 @@ def test_anything_else_is_not(url):
     assert config.is_local(url) is False
 
 
-def test_pointing_extraction_off_the_machine_is_called_out(tmp_path):
-    """Transcripts carry names, addresses and phone numbers."""
-    (tmp_path / "config.toml").write_text(
-        '[extract]\nbase_url = "https://api.example.com"\n', encoding="utf-8"
-    )
-    cfg = config.load(root=tmp_path)
+def _with_extract(tmp_path, body):
+    (tmp_path / "config.toml").write_text(f"[extract]\n{body}\n", encoding="utf-8")
+    return config.load(root=tmp_path)
 
-    assert any("NOT this machine" in w for w in cfg.warnings)
+
+def test_pointing_extraction_at_the_internet_is_called_out(tmp_path):
+    """Transcripts carry names, addresses and phone numbers."""
+    cfg = _with_extract(tmp_path, 'base_url = "https://api.example.com"')
+
+    assert any("public internet" in w for w in cfg.warnings)
+
+
+def test_the_internet_is_refused_even_when_the_lan_is_allowed(tmp_path):
+    """allow_lan permits the machine next door. It is not a blanket override,
+    or it would be a way to turn the guard off by accident."""
+    cfg = _with_extract(
+        tmp_path, 'base_url = "https://api.example.com"\nallow_lan = true'
+    )
+
+    assert any("public internet" in w for w in cfg.warnings)
+
+
+def test_a_machine_on_your_own_network_asks_to_be_meant(tmp_path):
+    cfg = _with_extract(tmp_path, 'base_url = "http://192.168.1.50:11434"')
+
+    assert any("allow_lan" in w for w in cfg.warnings)
+
+
+def test_and_is_accepted_once_it_is(tmp_path):
+    cfg = _with_extract(
+        tmp_path, 'base_url = "http://192.168.1.50:11434"\nallow_lan = true'
+    )
+
+    assert cfg.warnings == []
+
+
+def test_which_addresses_count_as_your_own_network():
+    for private in ("http://192.168.1.50", "http://10.0.0.4", "http://172.16.5.1"):
+        assert config.is_private_network(private), private
+    for not_private in ("https://api.example.com", "http://8.8.8.8", "http://127.0.0.1"):
+        assert not config.is_private_network(not_private), not_private
+
+
+def test_a_hostname_is_not_assumed_to_be_next_door(tmp_path):
+    """It may well resolve to the machine in the corner, but nothing here can
+    tell -- so it is treated as the internet rather than guessed at."""
+    cfg = _with_extract(tmp_path, 'base_url = "http://macmini.local:11434"\nallow_lan = true')
+
+    assert any("public internet" in w for w in cfg.warnings)
 
 
 def test_the_shipped_default_stays_on_this_machine(tmp_path):

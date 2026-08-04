@@ -204,6 +204,20 @@ min_silence_s = 0.5
 # Local LLM that turns the raw transcript into work-order fields.
 base_url = "http://127.0.0.1:11434"
 
+# Permission to send transcripts to another machine on your own network -- a
+# spare PC or a Mac mini doing the slow work while this one stays responsive.
+# A sensible thing to want, and not something that should happen by accident,
+# so it has to be said out loud. It does NOT permit an address on the public
+# internet: nothing does.
+#
+#   [extract]
+#   base_url = "http://192.168.1.50:11434"
+#   allow_lan = true
+#
+# On that machine, Ollama must listen beyond its own loopback:
+#   OLLAMA_HOST=0.0.0.0 ollama serve
+allow_lan = false
+
 # Any model from https://ollama.com/library . Worth comparing on your own
 # hardware rather than taking anyone's word:
 #     run.bat compare somecall.wav --models gemma3:4b,gemma4:e4b

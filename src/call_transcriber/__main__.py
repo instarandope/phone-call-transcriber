@@ -570,15 +570,31 @@ def _cmd_doctor(cfg) -> int:
             check("diarization", False, str(exc))
 
     print("\nWhere the data goes")
-    local = config.is_local(cfg.extract.base_url)
-    check(
-        f"transcripts go to {cfg.extract.base_url}"
-        + (" (this machine)" if local else " -- OFF THIS MACHINE"),
-        local,
-        "" if local else
-        "Every transcript would be sent to that address. Set extract.base_url "
-        "back to http://127.0.0.1:11434 unless you genuinely intend this.",
-    )
+    where = cfg.extract.base_url
+    if config.is_local(where):
+        check(f"transcripts go to {where} (this machine)", True)
+    elif config.is_private_network(where) and cfg.extract.allow_lan:
+        # Deliberate, and reasonable -- a second machine doing the slow work.
+        # Still worth printing in full every time: it is the one place call
+        # details leave this computer, and it should never become invisible.
+        check(f"transcripts go to {where} (another machine on your network)", True)
+        print("       Allowed by allow_lan. Nothing leaves your network.")
+    elif config.is_private_network(where):
+        check(
+            f"transcripts go to {where}, which is not this machine",
+            False,
+            "That is another machine on your network, which is a reasonable "
+            "thing to want.\n       Say so on purpose: allow_lan = true under "
+            "[extract].",
+        )
+    else:
+        check(
+            f"transcripts go to {where} -- OFF YOUR NETWORK",
+            False,
+            "Every transcript -- names, addresses, phone numbers -- would be "
+            "sent there.\n       Set extract.base_url back to "
+            "http://127.0.0.1:11434 unless you genuinely intend this.",
+        )
     print("  [ok] call audio is never sent anywhere -- it is transcribed in memory")
     print("  [--] the internet is used once, to download models, and never again")
 
