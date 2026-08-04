@@ -271,18 +271,22 @@ extraction is lost, and the work order says so.
 
 ## Updating
 
-Download the ZIP, extract, and copy the files over your existing folder,
-choosing **Replace the files in the destination**. Your `.venv`, your
-`config.toml` and your `output` folder are not in the ZIP, so they survive
-untouched.
+**Double-click `update.bat`.** It fetches the current version, replaces only
+the program's own files, lists exactly what changed, checks the packages, and
+runs `doctor` — the whole sequence that used to be done by hand.
 
-If you extract to a **new** folder instead — which is what Windows does by
-default, leaving you with `phone-call-transcriber-main (1)` next to the old one
-— that new folder has no settings in it at all, because `config.toml` is not
-part of the download. `install.bat` handles this: it looks in the neighbouring
-folders for the install this one replaces and brings its `config.toml` across,
-saying so when it does. Double-click **`config.bat`** afterwards to confirm
-what came over.
+Nothing of yours can be caught up in it. `config.toml`, `output/`, `models/`
+and `.venv/` are excluded from the published archive, so they are not there to
+be overwritten; the updater refuses to write them regardless, in case that ever
+changes upstream by accident.
+
+If you would rather do it by hand: download the ZIP, extract, and copy the
+files over your existing folder, choosing **Replace the files in the
+destination**. If you extract to a **new** folder instead — which is what
+Windows does by default, leaving you with `phone-call-transcriber-main (1)` next
+to the old one — that new folder has no settings in it at all. `install.bat`
+handles this: it looks in the neighbouring folders for the install this one
+replaces and brings its `config.toml` across, saying so when it does.
 
 **The shipped defaults are the working setup**, so a `config.toml` is optional
 — delete it and the app behaves identically, using the same values built into
@@ -318,6 +322,7 @@ Everything can be run by double-clicking, so you never need a terminal:
 | **`devices.bat`** | List audio inputs, to find the adapter's name for `config.toml`. |
 | **`doctor.bat`** | Check everything: packages, adapter, models, output folder. |
 | **`levels.bat`** | Meter the phone line and print the threshold values to use. |
+| **`update.bat`** | Fetch and apply the latest version, then re-check everything. |
 | **`config.bat`** | Which `config.toml` is in use, and which settings are actually in effect. |
 | **`prompt.bat`** | Show exactly what the model is told to extract from a call. |
 | **`last.bat`** | Bring back the most recent work order and re-copy it. |

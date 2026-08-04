@@ -224,6 +224,7 @@ echo     devices.bat        - find your adapter's name for config.toml
 echo     doctor.bat         - check everything is ready
 echo     levels.bat         - meter your phone line, get the threshold values
 echo     config.bat         - which settings are actually in effect
+echo     update.bat         - get the latest version, in one click
 echo.
 echo   Then start it:
 echo     start-hidden.vbs   - background, tray icon only, nothing in the taskbar

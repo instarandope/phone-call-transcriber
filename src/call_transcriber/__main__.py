@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_doctor(cfg)
     if args.command == "config":
         return _cmd_config(cfg, args.create, args.value)
+    if args.command == "update":
+        return _cmd_update(cfg)
     if args.command == "prompt":
         return _cmd_prompt(cfg)
     if args.command == "last":
@@ -85,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
         metavar="SECTION.KEY",
         help="print one setting and nothing else, e.g. extract.model",
     )
+    sub.add_parser("update", help="fetch and apply the latest version")
     sub.add_parser("prompt", help="show exactly what the model is told to extract")
     sub.add_parser("last", help="reprint the most recent work order")
     fetch = sub.add_parser("models", help="download the optional speech models")
@@ -340,6 +343,34 @@ def _cmd_last(cfg) -> int:
     print(f"  from {path.parent}")
     if cfg.output.copy_to_clipboard and notify.copy(call["work_order"]):
         print("  copied to the clipboard - just paste")
+    return 0
+
+
+def _cmd_update(cfg) -> int:
+    """Replace the program's own files with the current published version."""
+    from . import update
+
+    print(f"Fetching the latest version into {cfg.root}\n")
+    try:
+        result = update.apply(update.fetch(), cfg.root)
+    except update.UpdateError as exc:
+        print(f"  [XX] {exc}")
+        return 1
+
+    if not result.anything:
+        print("  [ok] Already up to date. Nothing changed.")
+        return 0
+
+    for name in sorted(result.added):
+        print(f"  [+ ] {name}")
+    for name in sorted(result.changed):
+        print(f"  [ *] {name}")
+    print(f"\n  {len(result.added)} added, {len(result.changed)} updated.")
+    print("  Your config.toml, recordings and models were not touched.")
+
+    if result.needs_install:
+        print("\n  [!!] The dependency list changed, so the virtual environment")
+        print("       is out of date. Run install.bat before the next call.")
     return 0
 
 
