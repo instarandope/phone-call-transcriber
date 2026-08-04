@@ -72,7 +72,7 @@ downloaded.
 
 Set `mode` under `[control]` in `config.toml`.
 
-**`manual`** (the default) — a global hotkey, **Ctrl+Alt+R** out of the box,
+**`manual`** (the default) — a global hotkey, **F9** out of the box,
 starts recording; pressing it again stops. Two rising beeps confirm the start,
 two falling ones the stop, so you never have to look at the screen. **Nothing
 is recorded until you ask for it**, including at launch.
