@@ -73,3 +73,90 @@ def test_a_transcript_of_only_blank_segments_counts_as_empty():
         language="en", duration_s=1, layout="mono",
     )
     assert result.is_empty
+
+
+import sys
+
+import pytest
+
+from call_transcriber import config
+
+
+def tcfg(**overrides):
+    settings = config.load(__import__("pathlib").Path("/nope.toml")).transcribe
+    for key, value in overrides.items():
+        setattr(settings, key, value)
+    return settings
+
+
+# -- a half-installed GPU must not take whisper down -------------------------
+#
+# device = "auto" on a PC with an NVIDIA driver selects CUDA, and then dies
+# loading cublas64_12.dll -- the runtime DLLs are not part of the driver, so a
+# gaming PC that never installed the CUDA toolkit fails exactly this way. The
+# fix is the CPU, not an error message.
+
+
+def _gpu_fallback_setup(monkeypatch, error_message, cpu_ok=True):
+    attempts = []
+
+    class FakeWhisperModel:
+        def __init__(self, model, device="auto", compute_type="int8"):
+            attempts.append(device)
+            if device != "cpu":
+                raise RuntimeError(error_message)
+            if not cpu_ok:
+                raise RuntimeError("cpu is broken too")
+
+    import types
+
+    fake = types.ModuleType("faster_whisper")
+    fake.WhisperModel = FakeWhisperModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake)
+    monkeypatch.setattr(transcribe, "_model", None)
+    monkeypatch.setattr(transcribe, "_model_key", None)
+    return attempts
+
+
+def test_a_missing_cuda_runtime_falls_back_to_the_cpu(monkeypatch):
+    attempts = _gpu_fallback_setup(
+        monkeypatch, "Library cublas64_12.dll is not found or cannot be loaded"
+    )
+
+    transcribe.load_model(tcfg())
+
+    assert attempts == ["auto", "cpu"]
+
+
+def test_a_missing_cudnn_falls_back_too(monkeypatch):
+    attempts = _gpu_fallback_setup(monkeypatch, "Unable to load libcudnn_ops.so.9")
+
+    transcribe.load_model(tcfg())
+
+    assert attempts == ["auto", "cpu"]
+
+
+def test_an_ordinary_load_failure_is_still_an_error(monkeypatch):
+    """A bad model name must not be retried on the CPU and then blamed on it."""
+    attempts = _gpu_fallback_setup(monkeypatch, "Invalid model size 'basee.en'")
+
+    with pytest.raises(RuntimeError, match="could not load whisper model"):
+        transcribe.load_model(tcfg(model="basee.en"))
+
+    assert attempts == ["auto"]
+
+
+def test_asking_for_cpu_outright_never_retries(monkeypatch):
+    attempts = _gpu_fallback_setup(monkeypatch, "irrelevant", cpu_ok=False)
+
+    with pytest.raises(RuntimeError):
+        transcribe.load_model(tcfg(device="cpu"))
+
+    assert attempts == ["cpu"]
+
+
+def test_a_broken_cpu_after_a_broken_gpu_reports_the_cpu_error(monkeypatch):
+    _gpu_fallback_setup(monkeypatch, "cublas64_12.dll not found", cpu_ok=False)
+
+    with pytest.raises(RuntimeError, match="cpu is broken too"):
+        transcribe.load_model(tcfg())

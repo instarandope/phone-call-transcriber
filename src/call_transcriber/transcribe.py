@@ -81,6 +81,22 @@ def load_model(cfg):
         try:
             _model = WhisperModel(cfg.model, device=cfg.device, compute_type=cfg.compute_type)
         except Exception as exc:
+            # "auto" on a PC with an NVIDIA driver picks CUDA, and then fails
+            # here if the CUDA runtime DLLs are not installed too -- which on a
+            # machine nobody set up for GPU work is the normal state. That is a
+            # missing library, not a missing model, so the right answer is the
+            # CPU rather than an error message.
+            if cfg.device != "cpu" and _looks_like_missing_gpu_runtime(exc):
+                log.warning(
+                    "the GPU cannot be used (%s) -- using the CPU instead. Set "
+                    "device = \"cpu\" in [transcribe] to stop trying.", exc,
+                )
+                try:
+                    _model = WhisperModel(cfg.model, device="cpu", compute_type=cfg.compute_type)
+                    _model_key = key
+                    return _model
+                except Exception as cpu_exc:
+                    exc = cpu_exc
             # Nearly always either a bad model name or a compute_type the CPU
             # can't do; both are config problems worth naming explicitly.
             raise RuntimeError(
@@ -90,6 +106,18 @@ def load_model(cfg):
             ) from exc
         _model_key = key
         return _model
+
+
+def _looks_like_missing_gpu_runtime(exc: Exception) -> bool:
+    """A CUDA stack that is present enough to be chosen but too broken to run.
+
+    The give-away strings cover ctranslate2's failures on a machine with an
+    NVIDIA driver but no CUDA toolkit: the cuBLAS/cuDNN DLLs it needs are not
+    part of the driver, so `device="auto"` selects a GPU it cannot actually
+    use ("Library cublas64_12.dll is not found or cannot be loaded").
+    """
+    text = str(exc).lower()
+    return any(mark in text for mark in ("cublas", "cudnn", "cuda", "zlibwapi"))
 
 
 class EngineError(RuntimeError):
