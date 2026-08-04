@@ -1,0 +1,17 @@
+# Normalise text to LF inside the repository, as usual.
+* text=auto
+
+# ...except the Windows launchers, which are the only files here that are read
+# by something other than Python.
+#
+# cmd.exe and Windows Script Host both expect CRLF. cmd mostly tolerates Unix
+# endings, but "mostly" is the problem: a multi-line `if (...)` block -- which
+# run.bat and install.bat are built from -- is the documented place where that
+# tolerance runs out, and the failure is silent. No error, no output, straight
+# back to the prompt.
+#
+# So these are stored with CRLF bytes and marked -text, meaning nothing ever
+# rewrites them: not git on checkout, not a clone onto Linux, and not GitHub's
+# ZIP export, which is how this project is actually delivered.
+*.bat -text
+*.vbs -text
