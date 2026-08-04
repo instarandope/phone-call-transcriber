@@ -174,3 +174,34 @@ def test_a_call_that_fails_still_leaves_the_queue(cfg, monkeypatch):
     runner._pool.shutdown(wait=True)
 
     assert runner.pending == 0
+
+
+# -- when the crash is below Python ------------------------------------------
+#
+# ctranslate2, onnxruntime, libsndfile and PortAudio are C libraries, and when
+# one falls over it takes the interpreter with it: no exception, no traceback,
+# the console just returns to a prompt. faulthandler is the only thing that
+# says anything at all in that case.
+
+
+def test_a_crash_file_is_armed_next_to_the_program(tmp_path):
+    from call_transcriber import __main__ as cli
+
+    cli._catch_hard_crashes(tmp_path)
+
+    assert (tmp_path / cli.CRASH_FILENAME).exists()
+
+
+def test_setting_up_logging_arms_it(tmp_path):
+    from call_transcriber import __main__ as cli
+
+    cli._setup_logging(False, tmp_path)
+
+    assert (tmp_path / cli.CRASH_FILENAME).exists()
+
+
+def test_a_folder_that_cannot_be_written_to_is_not_worth_failing_over(tmp_path):
+    """Losing the crash log is a smaller problem than refusing to run."""
+    from call_transcriber import __main__ as cli
+
+    cli._catch_hard_crashes(tmp_path / "does" / "not" / "exist")

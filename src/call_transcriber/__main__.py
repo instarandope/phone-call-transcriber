@@ -175,6 +175,40 @@ def _setup_logging(verbose: bool, root: Path) -> None:
     logging.getLogger("faster_whisper").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
+    _catch_hard_crashes(root)
+
+
+CRASH_FILENAME = "call-transcriber-crash.log"
+
+
+def _catch_hard_crashes(root: Path) -> None:
+    """Leave a trace when the process dies below Python.
+
+    Most of this program's dependencies are C libraries -- ctranslate2,
+    onnxruntime, libsndfile, PortAudio -- and when one of those falls over it
+    takes the interpreter with it. There is no exception to catch and no
+    traceback: the process simply stops, mid-sentence, and the console returns
+    to a prompt as if nothing had been asked of it.
+
+    faulthandler is the only thing that says anything at all in that case. It
+    writes the C-level stack to a file at the moment of the fault, which turns
+    "it printed nothing" into something that can be read.
+    """
+    try:
+        handle = open(root / CRASH_FILENAME, "a", buffering=1, encoding="utf-8")
+    except OSError:
+        return  # read-only folder; not worth failing the run over
+
+    try:
+        import faulthandler
+
+        # Kept open deliberately for the life of the process: faulthandler
+        # writes to this descriptor from a signal handler, so it has to stay
+        # valid right up to the crash.
+        faulthandler.enable(file=handle, all_threads=True)
+    except Exception:
+        handle.close()
+
 
 def _fatal(message: str) -> int:
     """Report a startup failure, including when there is no console to see it."""

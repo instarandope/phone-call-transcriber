@@ -14,6 +14,7 @@ extracted*.json
 
 # Logs
 call-transcriber.log*
+call-transcriber-crash.log
 
 # Local configuration (may contain business details / paths)
 config.toml

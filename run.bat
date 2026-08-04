@@ -16,7 +16,19 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 set PYTHONPATH=%~dp0src
-".venv\Scripts\python.exe" -m call_transcriber %*
+REM -u keeps stdout unbuffered. A C library that crashes takes the
+REM interpreter with it, and anything still sitting in the buffer dies
+REM with it -- which turns "it failed at step three" into total silence.
+".venv\Scripts\python.exe" -u -m call_transcriber %*
+set EXITCODE=%ERRORLEVEL%
+
+REM A negative or huge code is a native crash rather than a Python error,
+REM so say so instead of leaving a blank console to interpret.
+if %EXITCODE% GEQ 2 (
+    echo.
+    echo   The program stopped unexpectedly ^(exit code %EXITCODE%^).
+    echo   See call-transcriber-crash.log next to this script.
+)
 
 REM Only hold the window open when something went wrong and there is an error
 REM to read; a clean Ctrl-C exit shouldn't need a keypress. The helper scripts
